@@ -1,0 +1,78 @@
+{
+    "_comment": "Fill this in with YOUR information. Used by AI features in Phase 2.",
+    "name": "Your Name",
+    "email": "your.email@example.com",
+    "phone": "+49 123 456 789",
+    "location": "Berlin, Germany",
+    "summary": "Your 2-3 sentence professional summary. Example: Experienced software engineer with 5+ years building scalable backend systems in Python and Go. Passionate about data engineering, cloud architecture, and building developer tools.",
+    "skills": [
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "AWS",
+        "Docker",
+        "Kubernetes",
+        "PostgreSQL",
+        "Redis",
+        "REST APIs",
+        "CI/CD",
+        "Git"
+    ],
+    "experience": [
+        {
+            "title": "Your Job Title",
+            "company": "Company Name",
+            "dates": "2022 - Present",
+            "bullets": [
+                "Achievement 1 with quantified results (e.g., Reduced API response time by 40% by implementing caching layer)",
+                "Achievement 2 with impact (e.g., Led migration of 3 microservices from monolith, improving deployment frequency by 5x)",
+                "Achievement 3 with technologies (e.g., Built real-time data pipeline processing 2M events/day using Kafka and Spark)"
+            ]
+        },
+        {
+            "title": "Previous Job Title",
+            "company": "Previous Company",
+            "dates": "2019 - 2022",
+            "bullets": [
+                "Achievement 1...",
+                "Achievement 2..."
+            ]
+        }
+    ],
+    "education": [
+        {
+            "degree": "M.Sc. Computer Science",
+            "school": "University Name",
+            "year": "2022"
+        },
+        {
+            "degree": "B.Sc. Computer Science",
+            "school": "University Name",
+            "year": "2019"
+        }
+    ],
+    "certifications": [
+        "AWS Solutions Architect Associate (optional)",
+        "Any other certifications..."
+    ],
+    "languages_spoken": [
+        "English (Fluent)",
+        "German (B2)"
+    ],
+    "preferred_keywords": [
+        "python",
+        "backend",
+        "data",
+        "cloud",
+        "software engineer",
+        "developer"
+    ],
+    "dealbreakers": [
+        "must relocate outside EU",
+        "unpaid",
+        "no visa sponsorship"
+    ],
+    "preferred_company_size": "any",
+    "preferred_work_style": "hybrid or remote",
+    "visa_status": "EU work permit / Blue Card / etc."
+}
