@@ -231,7 +231,7 @@ if search_clicked:
     progress_bar = st.progress(0, text="Initializing search...")
     status_area = st.empty()
 
-     step_count = [0]
+    step_count = [0]
     total_steps = sum([enable_jobspy, enable_dorking, use_arbeitnow, use_remotive]) + 4
     progress_log = []  # Thread-safe regular list instead of session_state
 
