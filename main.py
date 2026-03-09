@@ -127,6 +127,15 @@ def run_search(
     if search_locations:
         _progress(f"   Location scope: {len(search_locations)} locations")
 
+    # Auto-update company lists from GitHub (weekly)
+    try:
+        from scrapers.company_list_updater import update_company_lists
+        new_companies = update_company_lists(progress_callback=_progress)
+        if new_companies > 0:
+            _progress(f"📦 Updated company database: {new_companies} new companies added")
+    except Exception as e:
+        logger.debug("Company list update skipped: %s", e)
+
     all_jobs: list[dict] = []
     sources_used: list[str] = []
 
@@ -466,10 +475,9 @@ def _run_serpapi_safe(
             pass
 
         # Route URLs to ATS scrapers
-        # Use first search term for ATS filtering
         jobs = route_and_scrape(
             urls=urls,
-            search_term=search_terms[0] if search_terms else "",
+            search_terms=search_terms,
             location=location,
             progress_callback=progress_callback,
         )

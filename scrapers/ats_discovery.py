@@ -87,14 +87,32 @@ SMARTRECRUITERS_COMPANIES = [
     "Continental", "Infineon", "SAP",
 ]
 
+PERSONIO_COMPANIES = [
+    # German startups & SMEs using Personio
+    "flixbus", "thermondo", "urbanara", "comtravo",
+    "grover", "infarm", "tier-mobility", "gorillas",
+    "flink", "getir", "wolt", "foodspring",
+    "jimdo", "eyeo", "adjust", "contentful",
+    "signavio", "mambu", "raisin", "smava",
+    "homeday", "helpling", "kreditech", "fincompare",
+    "medwing", "kenjo", "leapsome", "moss",
+    "circula", "pleo", "agicap", "factorial",
+    "personio", "recruitee", "softgarden", "rexx-systems",
+    "haufe-lexware", "datev", "teamviewer", "celonis",
+    "tonies", "about-you", "otto-group", "mytheresa",
+    "limehome", "klarx", "forto", "sennder",
+    "lilium", "isar-aerospace", "volocopter",
+    "enpal", "1komma5", "klima", "planetly",
+]
+
 
 def discover_and_scrape(
     search_terms: list[str],
     location: str = "",
     search_locations: list[str] | None = None,
     hours_old: int = 720,
-    max_companies_per_ats: int = 40,
-    max_workers: int = 10,
+    max_companies_per_ats: int = 200,
+    max_workers: int = 15,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
@@ -127,15 +145,17 @@ def discover_and_scrape(
     sr_companies = list(
         set(SMARTRECRUITERS_COMPANIES + get_discovered_slugs("smartrecruiters"))
     )
+    pe_companies = list(set(PERSONIO_COMPANIES + get_discovered_slugs("personio")))
 
     total_companies = (
         len(gh_companies[:max_companies_per_ats])
         + len(lv_companies[:max_companies_per_ats])
         + len(ab_companies[:max_companies_per_ats])
         + len(sr_companies[:max_companies_per_ats])
+        + len(pe_companies[:max_companies_per_ats])
     )
 
-    _cb(f"ATS Discovery: Checking {total_companies} companies across 4 platforms...")
+    _cb(f"ATS Discovery: Checking {total_companies} companies across 5 platforms...")
 
     # Build location filter list
     if search_locations:
@@ -146,6 +166,8 @@ def discover_and_scrape(
         loc_filters = []  # No location filter = accept all
 
     all_jobs: list[dict] = []
+    start_time = time.time()
+    MAX_DISCOVERY_TIME = 120  # 2 minutes max for ATS discovery
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
@@ -178,6 +200,13 @@ def discover_and_scrape(
                 )
             ] = f"sr:{slug}"
 
+        for slug in pe_companies[:max_companies_per_ats]:
+            futures[
+                executor.submit(
+                    _safe_scrape, "personio", slug, search_terms, loc_filters
+                )
+            ] = f"pe:{slug}"
+
         completed = 0
         total = len(futures)
         companies_with_jobs = 0
@@ -185,6 +214,14 @@ def discover_and_scrape(
         for future in as_completed(futures):
             completed += 1
             label = futures[future]
+
+            if time.time() - start_time > MAX_DISCOVERY_TIME:
+                _cb(f"ATS Discovery: Time limit reached ({MAX_DISCOVERY_TIME}s). "
+                    f"Stopping with {len(all_jobs)} jobs from {completed}/{total} companies.")
+                for f in futures:
+                    f.cancel()
+                break
+
             try:
                 result = future.result(timeout=30)
                 if result:
@@ -232,6 +269,10 @@ def _safe_scrape(
             from scrapers.ats.smartrecruiters import scrape_sr_company
 
             all_jobs = scrape_sr_company(slug, search_term=None, location=None)
+        elif ats == "personio":
+            from scrapers.ats.personio import scrape_personio_company
+
+            all_jobs = scrape_personio_company(slug, search_term=None, location=None)
         else:
             return []
 

@@ -185,6 +185,28 @@ with st.sidebar:
 
     st.divider()
 
+    # Company Database
+    st.markdown("### 📦 Company Database")
+    try:
+        from scrapers.company_registry import load_registry
+        registry = load_registry()
+        total_companies = len(registry.get("companies", {}))
+        st.caption(f"Companies in database: {total_companies}")
+
+        if st.button("🔄 Update Company Lists", help="Download latest company lists from GitHub"):
+            with st.spinner("Downloading company lists..."):
+                from scrapers.company_list_updater import update_company_lists
+                new_count = update_company_lists(force=True)
+                if new_count > 0:
+                    st.success(f"Added {new_count} new companies!")
+                else:
+                    st.info("Company lists are up to date.")
+                st.rerun()
+    except Exception as e:
+        st.caption(f"Company database: error loading ({e})")
+
+    st.divider()
+
     # Filters
     st.markdown("### 🔧 Filters")
 
@@ -498,6 +520,43 @@ if st.session_state.search_results is not None:
     # =========================================================================
     # Phase 2 Placeholder
     # =========================================================================
+
+    # Show auto-discovery stats
+    try:
+        from scrapers.company_registry import load_registry as _load_reg
+        registry = _load_reg()
+        total = len(registry.get("companies", {}))
+        if total > 0:
+            st.divider()
+            st.markdown("### 📦 Company Registry")
+            st.caption(f"Total companies tracked: {total}")
+
+            # Show breakdown by ATS
+            ats_counts = {}
+            for v in registry["companies"].values():
+                ats = v.get("ats", "unknown")
+                ats_counts[ats] = ats_counts.get(ats, 0) + 1
+
+            cols = st.columns(len(ats_counts))
+            for i, (ats, count) in enumerate(sorted(ats_counts.items(), key=lambda x: -x[1])):
+                with cols[i % len(cols)]:
+                    st.metric(ats.title(), count)
+
+            # Show recently discovered
+            recent = sorted(
+                registry["companies"].values(),
+                key=lambda x: x.get("discovered_date", ""),
+                reverse=True,
+            )[:10]
+
+            if recent:
+                with st.expander("🆕 Recently Discovered Companies"):
+                    for company in recent:
+                        st.text(f"{company.get('company_name', 'Unknown')} ({company['ats']}) "
+                               f"— from {company.get('discovered_from', '?')}")
+    except Exception:
+        pass
+
     st.divider()
     st.markdown("### 🤖 AI Features — Coming in Phase 2")
     st.markdown(

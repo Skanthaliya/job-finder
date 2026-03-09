@@ -12,6 +12,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Callable
 
 from config import ATS_PATTERNS
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def route_and_scrape(
     urls: list[str],
-    search_term: str | None = None,
+    search_terms: list[str] | str | None = None,
     location: str | None = None,
     max_workers: int = 5,
     progress_callback: Callable[[str], None] | None = None,
@@ -35,7 +36,7 @@ def route_and_scrape(
 
     Args:
         urls: List of discovered URLs.
-        search_term: Optional keyword filter for ATS company scraping.
+        search_terms: Optional keyword filter(s) for ATS company scraping.
         location: Optional location filter.
         max_workers: Maximum concurrent scraping threads.
         progress_callback: Optional function for progress updates.
@@ -46,7 +47,42 @@ def route_and_scrape(
     if not urls:
         return []
 
+    # Normalize search_terms to list
+    if isinstance(search_terms, str):
+        search_terms = [search_terms] if search_terms else []
+    elif search_terms is None:
+        search_terms = []
+
     logger.info("URL Router: Classifying and routing %d URLs...", len(urls))
+
+    # Auto-save all discovered company slugs to registry
+    from scrapers.company_registry import load_registry, save_registry, extract_ats_from_url
+
+    registry = load_registry()
+    new_discovered = 0
+    for url in urls:
+        result = extract_ats_from_url(url)
+        if result:
+            ats, slug = result
+            key = f"{ats}:{slug}"
+            if key not in registry["companies"]:
+                registry["companies"][key] = {
+                    "ats": ats,
+                    "slug": slug,
+                    "company_name": slug.replace("-", " ").title(),
+                    "discovered_from": "serpapi",
+                    "discovered_date": datetime.now().isoformat(),
+                }
+                new_discovered += 1
+
+    if new_discovered > 0:
+        save_registry(registry)
+        logger.info("URL Router: Auto-saved %d new companies to registry", new_discovered)
+        if progress_callback:
+            try:
+                progress_callback(f"URL Router: Discovered {new_discovered} new companies for future searches!")
+            except Exception:
+                pass
 
     # Classify URLs
     classified: dict[str, list[dict]] = {
@@ -82,7 +118,7 @@ def route_and_scrape(
             if slug and slug not in scraped_companies:
                 scraped_companies.add(slug)
                 futures[executor.submit(
-                    _scrape_greenhouse_company, slug, search_term, location
+                    _scrape_greenhouse_company, slug, search_terms, location
                 )] = f"greenhouse:{slug}"
 
         # --- Lever (company-wide scraping) ---
@@ -91,7 +127,7 @@ def route_and_scrape(
             if slug and slug not in scraped_companies:
                 scraped_companies.add(slug)
                 futures[executor.submit(
-                    _scrape_lever_company, slug, search_term, location
+                    _scrape_lever_company, slug, search_terms, location
                 )] = f"lever:{slug}"
 
         # --- Ashby (company-wide scraping) ---
@@ -100,7 +136,7 @@ def route_and_scrape(
             if slug and slug not in scraped_companies:
                 scraped_companies.add(slug)
                 futures[executor.submit(
-                    _scrape_ashby_company, slug, search_term, location
+                    _scrape_ashby_company, slug, search_terms, location
                 )] = f"ashby:{slug}"
 
         # --- SmartRecruiters (company-wide scraping) ---
@@ -109,7 +145,7 @@ def route_and_scrape(
             if slug and slug not in scraped_companies:
                 scraped_companies.add(slug)
                 futures[executor.submit(
-                    _scrape_sr_company, slug, search_term, location
+                    _scrape_sr_company, slug, search_terms, location
                 )] = f"smartrecruiters:{slug}"
 
         # --- Workday (per-URL scraping, company-wide where possible) ---
@@ -119,7 +155,7 @@ def route_and_scrape(
             if url not in workday_urls_handled:
                 workday_urls_handled.add(url)
                 futures[executor.submit(
-                    _scrape_workday_job, url
+                    _scrape_workday_job, url, search_terms, location
                 )] = f"workday:{url[:60]}"
 
         # --- Personio (per-company if slug extractable) ---
@@ -130,12 +166,12 @@ def route_and_scrape(
             if slug and slug not in personio_handled:
                 personio_handled.add(slug)
                 futures[executor.submit(
-                    _scrape_personio_company, slug, search_term, location
+                    _scrape_personio_company, slug, search_terms, location
                 )] = f"personio:{slug}"
             elif not slug and url not in personio_handled:
                 personio_handled.add(url)
                 futures[executor.submit(
-                    _scrape_personio_job, url
+                    _scrape_personio_job, url, search_terms, location
                 )] = f"personio:{url[:60]}"
 
         # --- Generic (individual URL scraping, limited) ---
@@ -199,78 +235,101 @@ def _classify_url(url: str) -> tuple[str, str | None]:
 # Safe scraper wrappers (each catches its own exceptions)
 # =============================================================================
 
-def _scrape_greenhouse_company(slug: str, search_term: str | None, location: str | None) -> list[dict]:
+def _scrape_greenhouse_company(slug: str, search_terms: list[str], location: str | None) -> list[dict]:
     """Safely scrape a Greenhouse company."""
     try:
         from scrapers.ats.greenhouse import scrape_greenhouse_company
-        time.sleep(1)  # Rate limit: 1s between company API calls
-        return scrape_greenhouse_company(slug, search_term, location)
+        time.sleep(1)
+        all_jobs = scrape_greenhouse_company(slug, search_term=None, location=None)
+        if not all_jobs:
+            return []
+        return _filter_by_terms_and_location(all_jobs, search_terms, location)
     except Exception as e:
         logger.error("Greenhouse scrape failed for %s: %s", slug, e)
         return []
 
 
-def _scrape_lever_company(slug: str, search_term: str | None, location: str | None) -> list[dict]:
+def _scrape_lever_company(slug: str, search_terms: list[str], location: str | None) -> list[dict]:
     """Safely scrape a Lever company."""
     try:
         from scrapers.ats.lever import scrape_lever_company
         time.sleep(1)
-        return scrape_lever_company(slug, search_term, location)
+        all_jobs = scrape_lever_company(slug, search_term=None, location=None)
+        if not all_jobs:
+            return []
+        return _filter_by_terms_and_location(all_jobs, search_terms, location)
     except Exception as e:
         logger.error("Lever scrape failed for %s: %s", slug, e)
         return []
 
 
-def _scrape_ashby_company(slug: str, search_term: str | None, location: str | None) -> list[dict]:
+def _scrape_ashby_company(slug: str, search_terms: list[str], location: str | None) -> list[dict]:
     """Safely scrape an Ashby company."""
     try:
         from scrapers.ats.ashby import scrape_ashby_company
         time.sleep(1)
-        return scrape_ashby_company(slug, search_term, location)
+        all_jobs = scrape_ashby_company(slug, search_term=None, location=None)
+        if not all_jobs:
+            return []
+        return _filter_by_terms_and_location(all_jobs, search_terms, location)
     except Exception as e:
         logger.error("Ashby scrape failed for %s: %s", slug, e)
         return []
 
 
-def _scrape_sr_company(slug: str, search_term: str | None, location: str | None) -> list[dict]:
+def _scrape_sr_company(slug: str, search_terms: list[str], location: str | None) -> list[dict]:
     """Safely scrape a SmartRecruiters company."""
     try:
         from scrapers.ats.smartrecruiters import scrape_sr_company
         time.sleep(1)
-        return scrape_sr_company(slug, search_term, location)
+        all_jobs = scrape_sr_company(slug, search_term=None, location=None)
+        if not all_jobs:
+            return []
+        return _filter_by_terms_and_location(all_jobs, search_terms, location)
     except Exception as e:
         logger.error("SmartRecruiters scrape failed for %s: %s", slug, e)
         return []
 
 
-def _scrape_workday_job(url: str) -> dict | None:
+def _scrape_workday_job(url: str, search_terms: list[str], location: str | None) -> dict | None:
     """Safely scrape a Workday job."""
     try:
         from scrapers.ats.workday import scrape_workday_job
         time.sleep(0.5)
-        return scrape_workday_job(url)
+        job = scrape_workday_job(url)
+        if job:
+            filtered = _filter_by_terms_and_location([job], search_terms, location)
+            return filtered[0] if filtered else None
+        return None
     except Exception as e:
         logger.error("Workday scrape failed for %s: %s", url, e)
         return None
 
 
-def _scrape_personio_company(slug: str, search_term: str | None, location: str | None) -> list[dict]:
+def _scrape_personio_company(slug: str, search_terms: list[str], location: str | None) -> list[dict]:
     """Safely scrape a Personio company."""
     try:
         from scrapers.ats.personio import scrape_personio_company
         time.sleep(1)
-        return scrape_personio_company(slug, search_term, location)
+        all_jobs = scrape_personio_company(slug, search_term=None, location=None)
+        if not all_jobs:
+            return []
+        return _filter_by_terms_and_location(all_jobs, search_terms, location)
     except Exception as e:
         logger.error("Personio scrape failed for %s: %s", slug, e)
         return []
 
 
-def _scrape_personio_job(url: str) -> dict | None:
+def _scrape_personio_job(url: str, search_terms: list[str], location: str | None) -> dict | None:
     """Safely scrape a single Personio job."""
     try:
         from scrapers.ats.personio import scrape_personio_job
         time.sleep(0.5)
-        return scrape_personio_job(url)
+        job = scrape_personio_job(url)
+        if job:
+            filtered = _filter_by_terms_and_location([job], search_terms, location)
+            return filtered[0] if filtered else None
+        return None
     except Exception as e:
         logger.error("Personio job scrape failed for %s: %s", url, e)
         return None
@@ -285,3 +344,43 @@ def _scrape_generic(url: str) -> dict | None:
     except Exception as e:
         logger.error("Generic scrape failed for %s: %s", url, e)
         return None
+
+
+def _filter_by_terms_and_location(
+    jobs: list[dict], search_terms: list[str], location: str | None
+) -> list[dict]:
+    """Filter jobs by multiple search terms and location."""
+    if not search_terms and not location:
+        return jobs
+
+    terms_lower = [t.lower() for t in search_terms] if search_terms else []
+    loc_lower = location.lower() if location else ""
+
+    matched = []
+    for job in jobs:
+        title = (job.get("title") or "").lower()
+        desc = (job.get("description") or "").lower()
+
+        # Check search terms (if any)
+        if terms_lower:
+            term_match = False
+            for term in terms_lower:
+                words = term.split()
+                if all(w in title for w in words):
+                    term_match = True
+                    break
+                if all(w in desc for w in words):
+                    term_match = True
+                    break
+            if not term_match:
+                continue
+
+        # Check location (if set)
+        if loc_lower:
+            job_loc = (job.get("location") or "").lower()
+            if loc_lower not in job_loc and "remote" not in job_loc:
+                continue
+
+        matched.append(job)
+
+    return matched

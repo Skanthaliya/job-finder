@@ -1,3 +1,4 @@
+# Core
 python-jobspy>=1.1.75
 openpyxl>=3.1.0
 langdetect>=1.0.9
@@ -5,6 +6,13 @@ streamlit>=1.30.0
 pandas>=2.0.0
 beautifulsoup4>=4.12.0
 requests>=2.31.0
-googlesearch-python>=1.2.0
 lxml>=5.0.0
+
+# Optional: Google dorking (legacy, rate-limited)
+googlesearch-python>=1.2.0
+
+# Optional: AI features (Phase 2)
 google-generativeai>=0.5.0
+
+# Note: SerpAPI uses requests (already included) — no extra package needed
+# Sign up for free API key at https://serpapi.com
