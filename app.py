@@ -231,15 +231,19 @@ if search_clicked:
     progress_bar = st.progress(0, text="Initializing search...")
     status_area = st.empty()
 
-    step_count = [0]
-    total_steps = sum([enable_jobspy, enable_dorking, use_arbeitnow, use_remotive]) + 4  # +4 for post-processing
+     step_count = [0]
+    total_steps = sum([enable_jobspy, enable_dorking, use_arbeitnow, use_remotive]) + 4
+    progress_log = []  # Thread-safe regular list instead of session_state
 
     def streamlit_progress(msg: str) -> None:
-        """Update progress in the Streamlit UI."""
-        st.session_state.progress_messages.append(msg)
-        step_count[0] += 0.5
-        progress_pct = min(step_count[0] / (total_steps * 3), 0.98)
-        progress_bar.progress(progress_pct, text=msg[:100])
+        """Update progress in the Streamlit UI (thread-safe)."""
+        try:
+            progress_log.append(msg)
+            step_count[0] += 0.5
+            progress_pct = min(step_count[0] / (total_steps * 3), 0.98)
+            progress_bar.progress(progress_pct, text=msg[:100])
+        except Exception:
+            pass  # Silently ignore progress update failures from threads
 
     try:
         with st.spinner("Searching for jobs..."):
@@ -272,7 +276,7 @@ if search_clicked:
 
     # Show progress log
     with st.expander("📋 Search Log", expanded=False):
-        for msg in st.session_state.progress_messages:
+        for msg in progress_log:
             st.text(msg)
 
 
