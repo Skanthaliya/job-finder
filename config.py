@@ -10,11 +10,34 @@ import os
 # =============================================================================
 # Search Defaults
 # =============================================================================
-DEFAULT_SEARCH_TERM = "Software Engineer"
+DEFAULT_SEARCH_TERM = "Product Owner"  # Legacy single-term (kept for compat)
+DEFAULT_SEARCH_TERMS = [
+    "Product Owner",
+    "Junior Product Owner",
+    "Scrum Master",
+    "Project Manager",
+]
 DEFAULT_LOCATION = "Berlin"
 DEFAULT_COUNTRY = "Germany"
 DEFAULT_HOURS_OLD = 168  # 7 days
 DEFAULT_RESULTS_PER_SITE = 50
+
+# =============================================================================
+# Location Scope
+# =============================================================================
+LOCATION_SCOPE_OPTIONS = ["City", "Country", "Europe"]
+
+EUROPEAN_COUNTRIES = [
+    "Germany", "Austria", "Switzerland", "Netherlands", "Belgium",
+    "France", "UK", "Ireland", "Sweden", "Denmark", "Norway",
+    "Finland", "Spain", "Italy", "Portugal", "Poland",
+    "Czech Republic", "Luxembourg", "Estonia", "Latvia", "Lithuania",
+]
+
+# =============================================================================
+# SerpAPI (optional — free tier: 100 searches/month)
+# =============================================================================
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
 # =============================================================================
 # JobSpy Sites

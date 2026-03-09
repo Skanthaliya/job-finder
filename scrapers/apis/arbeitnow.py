@@ -20,7 +20,9 @@ API_URL = "https://www.arbeitnow.com/api/job-board-api"
 
 def scrape_arbeitnow(
     search_term: str = "",
+    search_terms: list[str] | None = None,
     location: str = "",
+    search_locations: list[str] | None = None,
     language_filter: str | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
@@ -28,14 +30,33 @@ def scrape_arbeitnow(
     Scrape jobs from the Arbeitnow public API.
 
     Args:
-        search_term: Keywords to filter by (matched against title, description, tags).
+        search_term: Keywords to filter by (legacy single-term).
+        search_terms: List of job titles to search for (multi-role).
         location: Location to filter by.
+        search_locations: List of locations to match against (country/Europe scope).
         language_filter: Optional language filter ("English", "German", etc.).
         progress_callback: Optional function for progress updates.
 
     Returns:
         List of dicts matching the unified job schema.
     """
+    # Normalize search terms
+    if search_terms:
+        terms_list = search_terms
+    elif search_term:
+        terms_list = [search_term]
+    else:
+        terms_list = []
+    search_terms_lower = [t.lower().strip() for t in terms_list if t.strip()]
+
+    # Normalize location filters
+    if search_locations:
+        loc_filters = [loc.lower().strip() for loc in search_locations]
+    elif location:
+        loc_filters = [location.lower().strip()]
+    else:
+        loc_filters = []
+
     if progress_callback:
         progress_callback("Fetching jobs from Arbeitnow API...")
 
@@ -77,10 +98,6 @@ def scrape_arbeitnow(
         if progress_callback:
             progress_callback(f"Arbeitnow: {len(all_postings)} postings fetched. Filtering...")
 
-        # Filter and map
-        search_lower = search_term.lower().strip() if search_term else ""
-        location_lower = location.lower().strip() if location else ""
-
         for posting in all_postings:
             try:
                 title = posting.get("title", "") or ""
@@ -90,17 +107,36 @@ def scrape_arbeitnow(
                 tags = posting.get("tags", []) or []
                 tags_str = " ".join(tags).lower()
 
-                # Client-side keyword filter
-                searchable_text = f"{title} {description} {tags_str}".lower()
-                if search_lower and search_lower not in searchable_text:
-                    # Try matching individual words
-                    words = search_lower.split()
-                    if not any(w in searchable_text for w in words):
+                # Strict multi-role keyword filter
+                if search_terms_lower:
+                    title_lower = title.lower()
+                    searchable_lower = f"{title} {description} {tags_str}".lower()
+
+                    term_match = False
+                    for term in search_terms_lower:
+                        # Full phrase match in title
+                        if term in title_lower:
+                            term_match = True
+                            break
+                        # All words must appear in title
+                        words = term.split()
+                        if all(w in title_lower for w in words):
+                            term_match = True
+                            break
+                        # All words must appear in description/tags
+                        if all(w in searchable_lower for w in words):
+                            term_match = True
+                            break
+
+                    if not term_match:
                         continue
 
-                # Client-side location filter
-                if location_lower and location_lower not in loc.lower():
-                    continue
+                # Location filter: match if ANY location filter matches
+                if loc_filters:
+                    loc_lower = loc.lower()
+                    loc_match = any(lf in loc_lower for lf in loc_filters)
+                    if not loc_match:
+                        continue
 
                 # Language filter via tags
                 if language_filter and language_filter != "All":

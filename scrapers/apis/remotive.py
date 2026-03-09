@@ -39,20 +39,43 @@ CATEGORY_MAP = {
 
 def scrape_remotive(
     search_term: str = "",
+    search_terms: list[str] | None = None,
     location: str = "",
+    search_locations: list[str] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
     Scrape remote jobs from the Remotive public API.
 
     Args:
-        search_term: Keywords to filter by.
+        search_term: Keywords to filter by (legacy single-term).
+        search_terms: List of job titles for multi-role search.
         location: Location to filter by (many Remotive jobs are worldwide).
+        search_locations: List of locations to match against.
         progress_callback: Optional function for progress updates.
 
     Returns:
         List of dicts matching the unified job schema.
     """
+    # Normalize search terms
+    if search_terms:
+        terms_list = search_terms
+    elif search_term:
+        terms_list = [search_term]
+    else:
+        terms_list = []
+    search_terms_lower = [t.lower().strip() for t in terms_list if t.strip()]
+
+    # Use first term for category mapping
+    search_lower = search_terms_lower[0] if search_terms_lower else ""
+
+    # Normalize location filters
+    if search_locations:
+        loc_filters = [loc.lower().strip() for loc in search_locations]
+    elif location:
+        loc_filters = [location.lower().strip()]
+    else:
+        loc_filters = []
     if progress_callback:
         progress_callback("Fetching jobs from Remotive API...")
 
@@ -66,7 +89,6 @@ def scrape_remotive(
 
         # Try to map search_term to a Remotive category
         params = {}
-        search_lower = search_term.lower().strip() if search_term else ""
         for keyword, category in CATEGORY_MAP.items():
             if keyword in search_lower:
                 params["category"] = category
@@ -83,8 +105,6 @@ def scrape_remotive(
         if progress_callback:
             progress_callback(f"Remotive: {len(all_jobs)} jobs fetched. Filtering...")
 
-        location_lower = location.lower().strip() if location else ""
-
         for posting in all_jobs:
             try:
                 title = posting.get("title", "") or ""
@@ -96,18 +116,35 @@ def scrape_remotive(
                 pub_date = posting.get("publication_date") or ""
                 url = posting.get("url", "") or ""
 
-                # Client-side keyword filter
-                searchable = f"{title} {description} {category}".lower()
-                if search_lower:
-                    words = search_lower.split()
-                    if not any(w in searchable for w in words):
+                # Strict multi-role keyword filter
+                if search_terms_lower:
+                    title_lower = title.lower()
+                    searchable = f"{title} {description} {category}".lower()
+
+                    term_match = False
+                    for term in search_terms_lower:
+                        # Full phrase match in title
+                        if term in title_lower:
+                            term_match = True
+                            break
+                        # All words must appear in title
+                        words = term.split()
+                        if all(w in title_lower for w in words):
+                            term_match = True
+                            break
+                        # All words must appear in description
+                        if all(w in searchable for w in words):
+                            term_match = True
+                            break
+
+                    if not term_match:
                         continue
 
-                # Client-side location filter
-                if location_lower:
-                    loc_searchable = f"{candidate_location}".lower()
-                    # Remotive jobs are often "Worldwide" or region-based
-                    if location_lower not in loc_searchable and "worldwide" not in loc_searchable:
+                # Location filter
+                if loc_filters:
+                    loc_searchable = candidate_location.lower()
+                    loc_match = any(lf in loc_searchable for lf in loc_filters)
+                    if not loc_match and "worldwide" not in loc_searchable:
                         continue
 
                 # Parse date

@@ -20,9 +20,11 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
-    DEFAULT_SEARCH_TERM,
+    DEFAULT_SEARCH_TERMS,
     DEFAULT_LOCATION,
     COUNTRIES,
+    EUROPEAN_COUNTRIES,
+    LOCATION_SCOPE_OPTIONS,
     TIME_FILTER_OPTIONS,
     JOB_TYPE_OPTIONS,
     LANGUAGE_FILTER_OPTIONS,
@@ -94,10 +96,41 @@ if "progress_messages" not in st.session_state:
 with st.sidebar:
     st.markdown("## ⚙️ Search Settings")
 
-    # Keywords & Location
-    search_term = st.text_input("🔑 Job Title / Keywords", value=DEFAULT_SEARCH_TERM)
-    location = st.text_input("📍 Location", value=DEFAULT_LOCATION)
-    country = st.selectbox("🌍 Country", options=COUNTRIES, index=0)
+    # Multi-Role Search
+    st.markdown("### 🔑 Job Titles / Keywords")
+    st.caption("Add multiple roles — one per line")
+    search_terms_text = st.text_area(
+        "Job Titles",
+        value="\n".join(DEFAULT_SEARCH_TERMS),
+        height=120,
+        label_visibility="collapsed",
+    )
+    search_terms = [t.strip() for t in search_terms_text.strip().split("\n") if t.strip()]
+
+    st.divider()
+
+    # Location Scope
+    st.subheader("📍 Location")
+    location_scope = st.selectbox(
+        "Search Scope",
+        options=LOCATION_SCOPE_OPTIONS,
+        index=0,
+        help="City: specific city. Country: entire country. Europe: all European countries.",
+    )
+
+    if location_scope == "City":
+        location = st.text_input("City", value=DEFAULT_LOCATION)
+        country = st.selectbox("🌍 Country", options=COUNTRIES, index=0)
+        search_locations = None
+    elif location_scope == "Country":
+        country = st.selectbox("🌍 Country", options=COUNTRIES, index=0)
+        location = ""  # Empty = whole country
+        search_locations = [country]
+    else:  # Europe
+        country = "Europe"
+        location = ""
+        search_locations = EUROPEAN_COUNTRIES
+        st.info(f"Searching across {len(EUROPEAN_COUNTRIES)} European countries")
 
     st.divider()
 
@@ -114,12 +147,12 @@ with st.sidebar:
         use_glassdoor = st.checkbox("Glassdoor", value=False)
         use_ziprecruiter = st.checkbox("ZipRecruiter", value=False)
 
-    st.markdown("**Google Dorking (Company Career Pages)**")
-    enable_dorking = st.checkbox(
-        "Enable Google Dorking",
+    st.markdown("**ATS Discovery (Company Career Pages)**")
+    enable_ats_discovery = st.checkbox(
+        "Enable ATS Discovery",
         value=True,
-        help="Searches Google for job postings directly on company career pages and ATS platforms "
-             "(Greenhouse, Lever, Workday, etc.). Discovers hidden jobs not listed on job boards.",
+        help="Directly queries 120+ company career pages on Greenhouse, Lever, Ashby, "
+             "SmartRecruiters. Finds jobs not listed on job boards.",
     )
 
     st.markdown("**Direct APIs**")
@@ -128,6 +161,27 @@ with st.sidebar:
         use_arbeitnow = st.checkbox("Arbeitnow", value=True)
     with col2:
         use_remotive = st.checkbox("Remotive", value=False)
+
+    st.markdown("**SerpAPI Dorking (Optional)**")
+    enable_serpapi = st.checkbox(
+        "Enable SerpAPI",
+        value=False,
+        help="Uses SerpAPI to run Google dork queries. Free tier: 100 searches/month. "
+             "Sign up at serpapi.com.",
+    )
+    serpapi_key = ""
+    if enable_serpapi:
+        serpapi_key = st.text_input(
+            "SerpAPI Key",
+            type="password",
+            help="Enter your SerpAPI key. Sign up free at serpapi.com",
+        )
+        try:
+            from scrapers.serpapi_dorker import get_monthly_usage
+            usage = get_monthly_usage()
+            st.caption(f"Monthly usage: {usage}/100 queries")
+        except Exception:
+            pass
 
     st.divider()
 
@@ -152,21 +206,6 @@ with st.sidebar:
     language_filter = st.selectbox("🗣️ Language Filter", options=LANGUAGE_FILTER_OPTIONS, index=0)
     if language_filter == "All":
         language_filter = None
-
-    st.divider()
-
-    # Advanced Dorking
-    with st.expander("🔬 Advanced Dorking"):
-        st.markdown("Add custom Google dork queries (one per line):")
-        custom_dorks_text = st.text_area(
-            "Custom Dork Queries",
-            placeholder='site:example.com "software engineer" "Berlin"\ninurl:careers "python developer"',
-            height=120,
-            label_visibility="collapsed",
-        )
-        custom_dorks = [
-            line.strip() for line in custom_dorks_text.strip().split("\n") if line.strip()
-        ] if custom_dorks_text.strip() else None
 
 
 # =============================================================================
@@ -206,13 +245,17 @@ with col_info:
     active_sources = []
     if enable_jobspy:
         active_sources.append(f"JobSpy ({', '.join(jobspy_sites)})")
-    if enable_dorking:
-        active_sources.append("Google Dorking")
+    if enable_ats_discovery:
+        active_sources.append("ATS Discovery")
     if use_arbeitnow:
         active_sources.append("Arbeitnow")
     if use_remotive:
         active_sources.append("Remotive")
+    if enable_serpapi and serpapi_key:
+        active_sources.append("SerpAPI")
     st.caption(f"Active sources: {' | '.join(active_sources)}")
+    if search_terms:
+        st.caption(f"Roles: {', '.join(search_terms[:4])}{'...' if len(search_terms) > 4 else ''}")
 
 
 # =============================================================================
@@ -232,7 +275,7 @@ if search_clicked:
     status_area = st.empty()
 
     step_count = [0]
-    total_steps = sum([enable_jobspy, enable_dorking, use_arbeitnow, use_remotive]) + 4
+    total_steps = sum([enable_jobspy, enable_ats_discovery, use_arbeitnow, use_remotive, enable_serpapi]) + 4
     progress_log = []  # Thread-safe regular list instead of session_state
 
     def streamlit_progress(msg: str) -> None:
@@ -248,8 +291,9 @@ if search_clicked:
     try:
         with st.spinner("Searching for jobs..."):
             jobs, filepath = run_search(
-                search_term=search_term,
+                search_terms=search_terms,
                 location=location,
+                search_locations=search_locations,
                 country=country,
                 hours_old=hours_old,
                 results_per_site=results_per_site,
@@ -258,11 +302,12 @@ if search_clicked:
                 language_filter=language_filter,
                 enable_jobspy=enable_jobspy,
                 jobspy_sites=jobspy_sites if enable_jobspy else None,
-                enable_google_dorking=enable_dorking,
+                enable_ats_discovery=enable_ats_discovery,
                 enable_arbeitnow=use_arbeitnow,
                 enable_remotive=use_remotive,
+                enable_serpapi=enable_serpapi and bool(serpapi_key),
+                serpapi_key=serpapi_key,
                 output_format="excel",
-                custom_dorks=custom_dorks,
                 progress_callback=streamlit_progress,
             )
 
