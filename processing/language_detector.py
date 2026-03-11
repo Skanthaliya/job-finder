@@ -48,6 +48,25 @@ GERMAN_REQUIRED_PATTERNS = [
     r"(arbeitssprache|unternehmenssprache).*deutsch",
     r"sichere\s+deutschkenntnisse",
     r"deutsch\s+in\s+wort\s+und\s+schrift",
+    # Title-based and hyphenated patterns
+    r"german[\s-]speaker",
+    r"native[\s-]level\s+german",
+    r"business[\s-]level\s+german",
+    r"professional[\s-]level\s+german",
+    r"german\s+native\s+speaker",
+    r"mother[\s-]tongue.*german",
+    r"german.*mother[\s-]tongue",
+    r"native[\s-]german",
+    # Confident/conversational German
+    r"confident\s+(business\s+)?german",
+    r"conversational\s+german",
+    r"(good|solid|strong)\s+command\s+of\s+german",
+    r"german\s+(skills?\s+)?(required|needed|essential|mandatory)",
+    r"(speak|speaking)\s+german",
+    # Level-based patterns with hyphens
+    r"german\s+(b1|b2|c1|c2)[\s-]level",
+    r"(b1|b2|c1|c2)[\s-]level\s+(in\s+)?german",
+    r"german\s+language\s+(required|needed|skills|proficiency)",
 ]
 
 # Patterns: GERMAN IS OPTIONAL (nice to have, not blocking)
@@ -80,6 +99,10 @@ GERMAN_TITLE_PATTERNS = [
     r"fachinformatiker", r"kaufmann", r"kauffrau",
     r"werkstudent", r"praktikant", r"auszubildende",
     r"referent(in)?", r"teamleiter(in)?",
+    r"german[\s-]speak", r"deutschsprachig",
+    r"german[\s-]native", r"muttersprachler",
+    r"german\s+required", r"deutsch\s+erforderlich",
+    r"deu?tschland",
 ]
 
 
@@ -146,9 +169,17 @@ def detect_language(text: Optional[str], title: str = "") -> str:
 
     # No explicit language keywords — use text language
     if text_lang == "en":
-        # Check title for German patterns as extra signal
-        if title and any(re.search(p, title.lower()) for p in GERMAN_TITLE_PATTERNS):
-            return "English (German plus)"  # English desc but German-style title
+        if title:
+            title_lower = title.lower()
+            # Check title for German-required patterns (e.g., "German Speaker")
+            title_requires_german = any(
+                re.search(p, title_lower) for p in GERMAN_REQUIRED_PATTERNS
+            )
+            if title_requires_german:
+                return "German"
+            # Check title for German-style patterns (e.g., "(m/w/d)")
+            if any(re.search(p, title_lower) for p in GERMAN_TITLE_PATTERNS):
+                return "English (German plus)"
         return "English"
     elif text_lang == "fr":
         return "French"
