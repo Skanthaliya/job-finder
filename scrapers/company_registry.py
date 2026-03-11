@@ -77,13 +77,17 @@ def learn_from_jobs(jobs: list[dict]):
                 ats, slug = result
                 key = f"{ats}:{slug}"
                 if key not in registry["companies"]:
-                    registry["companies"][key] = {
+                    entry = {
                         "ats": ats,
                         "slug": slug,
                         "company_name": job.get("company", slug),
                         "discovered_from": job.get("source", "unknown"),
                         "discovered_date": datetime.now().isoformat(),
                     }
+                    # For Workday, save full URL (slug alone isn't enough)
+                    if ats == "workday":
+                        entry["url"] = check_url
+                    registry["companies"][key] = entry
                     new_count += 1
                     logger.info("New company discovered: %s on %s", slug, ats)
 

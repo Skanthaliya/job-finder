@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import (
     DEFAULT_SEARCH_TERMS,
     DEFAULT_LOCATION,
+    DEFAULT_LOCATION_SCOPE,
     COUNTRIES,
     EUROPEAN_COUNTRIES,
     LOCATION_SCOPE_OPTIONS,
@@ -102,7 +103,7 @@ with st.sidebar:
     search_terms_text = st.text_area(
         "Job Titles",
         value="\n".join(DEFAULT_SEARCH_TERMS),
-        height=120,
+        height=200,  # Increased from 120 to fit more roles
         label_visibility="collapsed",
     )
     search_terms = [t.strip() for t in search_terms_text.strip().split("\n") if t.strip()]
@@ -111,10 +112,12 @@ with st.sidebar:
 
     # Location Scope
     st.subheader("📍 Location")
+    default_scope_index = LOCATION_SCOPE_OPTIONS.index(DEFAULT_LOCATION_SCOPE) if DEFAULT_LOCATION_SCOPE in LOCATION_SCOPE_OPTIONS else 0
+
     location_scope = st.selectbox(
         "Search Scope",
         options=LOCATION_SCOPE_OPTIONS,
-        index=0,
+        index=default_scope_index,
         help="City: specific city. Country: entire country. Europe: all European countries.",
     )
 
@@ -381,7 +384,8 @@ if st.session_state.search_results is not None:
         with col2:
             st.metric("Sources Used", len(source_counts))
         with col3:
-            st.metric("English Jobs", lang_counts.get("English", 0))
+            eng_count = lang_counts.get("English", 0) + lang_counts.get("English (German plus)", 0)
+            st.metric("English-OK Jobs", eng_count)
         with col4:
             st.metric("German Jobs", lang_counts.get("German", 0))
 

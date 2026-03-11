@@ -105,6 +105,46 @@ PERSONIO_COMPANIES = [
     "enpal", "1komma5", "klima", "planetly",
 ]
 
+# Workday requires full base URLs — can't be guessed from slug alone
+# Format: "Company Name" -> "base URL for Workday jobs API"
+# These are FREE to query — no API key, no signup needed
+WORKDAY_CAREER_URLS = {
+    # German DAX / major German companies
+    "Siemens": "https://siemens.wd3.myworkdayjobs.com/en-US/External",
+    "SAP": "https://sap.wd1.myworkdayjobs.com/en-US/SAPCareers",
+    "BMW": "https://bmw.wd3.myworkdayjobs.com/en/BMW_Careers",
+    "Allianz": "https://allianz.wd3.myworkdayjobs.com/en-US/Allianz",
+    "Deutsche Bank": "https://db.wd3.myworkdayjobs.com/en-US/DBWebsite",
+    "Bosch": "https://bosch.wd3.myworkdayjobs.com/en-US/BoschCareers",
+    "Mercedes-Benz": "https://mercedesbenz.wd3.myworkdayjobs.com/en-US/Mercedesbenz",
+    "Bayer": "https://bayer.wd3.myworkdayjobs.com/en-US/BayerCareer",
+    "BASF": "https://basf.wd3.myworkdayjobs.com/en-US/BASFCareers",
+    "Deutsche Telekom": "https://telekom.wd3.myworkdayjobs.com/en-US/External",
+    "Henkel": "https://henkel.wd3.myworkdayjobs.com/en-US/Henkel",
+    "Continental": "https://continental.wd3.myworkdayjobs.com/en-US/ExternalCareerSite",
+    "Infineon": "https://infineon.wd3.myworkdayjobs.com/en-US/Infineon",
+    "Volkswagen": "https://volkswagen.wd3.myworkdayjobs.com/en-US/Volkswagen",
+    # European
+    "Philips": "https://philips.wd3.myworkdayjobs.com/en-US/jobs_philips",
+    "Unilever": "https://unilever.wd3.myworkdayjobs.com/en-US/Unilever",
+    "Roche": "https://roche.wd3.myworkdayjobs.com/en-US/roche-ext",
+    "Novartis": "https://novartis.wd3.myworkdayjobs.com/en-US/Novartis_Careers",
+    "ABB": "https://abb.wd3.myworkdayjobs.com/en-US/ABB",
+    "Ericsson": "https://ericsson.wd3.myworkdayjobs.com/en-US/Ericsson",
+    # US tech (hiring in Europe)
+    "Salesforce": "https://salesforce.wd12.myworkdayjobs.com/en-US/External_Career_Site",
+    "Adobe": "https://adobe.wd5.myworkdayjobs.com/en-US/external_experienced",
+    "Intel": "https://intel.wd1.myworkdayjobs.com/en-US/External",
+    "PayPal": "https://paypal.wd1.myworkdayjobs.com/en-US/jobs",
+    "Mastercard": "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers",
+    "ServiceNow": "https://servicenow.wd1.myworkdayjobs.com/en-US/Careers",
+    "Workday": "https://workday.wd5.myworkdayjobs.com/en-US/Workday",
+    "Oracle": "https://oracle.wd1.myworkdayjobs.com/en-US/Careers",
+    "IBM": "https://ibm.wd5.myworkdayjobs.com/en-US/IBM_Careers",
+    "Cisco": "https://cisco.wd5.myworkdayjobs.com/en-US/External",
+    "Dell": "https://dell.wd1.myworkdayjobs.com/en-US/External",
+}
+
 
 def discover_and_scrape(
     search_terms: list[str],
@@ -147,6 +187,16 @@ def discover_and_scrape(
     )
     pe_companies = list(set(PERSONIO_COMPANIES + get_discovered_slugs("personio")))
 
+    # Load Workday URLs from registry (previously discovered)
+    from scrapers.company_registry import load_registry as _load_reg
+    _reg = _load_reg()
+    discovered_workday = {}
+    for key, val in _reg.get("companies", {}).items():
+        if val.get("ats") == "workday" and val.get("url"):
+            discovered_workday[val.get("company_name", val["slug"])] = val["url"]
+
+    all_workday = {**WORKDAY_CAREER_URLS, **discovered_workday}
+
     total_companies = (
         len(gh_companies[:max_companies_per_ats])
         + len(lv_companies[:max_companies_per_ats])
@@ -155,7 +205,8 @@ def discover_and_scrape(
         + len(pe_companies[:max_companies_per_ats])
     )
 
-    _cb(f"ATS Discovery: Checking {total_companies} companies across 5 platforms...")
+    _cb(f"ATS Discovery: Checking {total_companies} companies + "
+        f"{len(all_workday)} Workday career pages across 6 platforms...")
 
     # Build location filter list
     if search_locations:
@@ -206,6 +257,12 @@ def discover_and_scrape(
                     _safe_scrape, "personio", slug, search_terms, loc_filters
                 )
             ] = f"pe:{slug}"
+
+        # --- Workday (requires full URLs, not slugs) ---
+        for company_name, base_url in list(all_workday.items())[:max_companies_per_ats]:
+            futures[executor.submit(
+                _safe_scrape_workday, base_url, company_name, search_terms, loc_filters
+            )] = f"wd:{company_name}"
 
         completed = 0
         total = len(futures)
@@ -318,4 +375,53 @@ def _safe_scrape(
 
     except Exception as e:
         logger.debug("%s:%s failed: %s", ats, slug, e)
+        return []
+
+
+def _safe_scrape_workday(
+    base_url: str, company_name: str,
+    search_terms: list[str], loc_filters: list[str]
+) -> list[dict]:
+    """Safely scrape a Workday career page using existing workday.py scraper."""
+    try:
+        time.sleep(0.5)
+        from scrapers.ats.workday import scrape_workday_company
+
+        all_jobs = scrape_workday_company(base_url)
+        if not all_jobs:
+            return []
+
+        # Filter by search terms and location (same logic as _safe_scrape)
+        matched = []
+        search_terms_lower = [t.lower() for t in search_terms]
+        for job in all_jobs:
+            title = (job.get("title") or "").lower()
+            desc = (job.get("description") or "").lower()
+
+            term_match = False
+            for term in search_terms_lower:
+                words = term.split()
+                if all(w in title for w in words):
+                    term_match = True
+                    break
+                if all(w in desc for w in words):
+                    term_match = True
+                    break
+            if not term_match:
+                continue
+
+            if loc_filters:
+                job_loc = (job.get("location") or "").lower()
+                if not any(loc in job_loc for loc in loc_filters) and "remote" not in job_loc:
+                    continue
+
+            job["source"] = "ats_discovery"
+            job["ats_platform"] = "workday"
+            job["company"] = job.get("company") or company_name
+            matched.append(job)
+
+        return matched
+    except Exception as e:
+        # Use debug, not error — many Workday URLs may be wrong, that's expected
+        logger.debug("Workday %s failed: %s", company_name, e)
         return []

@@ -66,13 +66,16 @@ def route_and_scrape(
             ats, slug = result
             key = f"{ats}:{slug}"
             if key not in registry["companies"]:
-                registry["companies"][key] = {
+                entry = {
                     "ats": ats,
                     "slug": slug,
                     "company_name": slug.replace("-", " ").title(),
                     "discovered_from": "serpapi",
                     "discovered_date": datetime.now().isoformat(),
                 }
+                if ats == "workday":
+                    entry["url"] = url
+                registry["companies"][key] = entry
                 new_discovered += 1
 
     if new_discovered > 0:

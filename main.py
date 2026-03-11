@@ -229,39 +229,37 @@ def run_search(
     all_jobs = detect_languages_batch(all_jobs)
 
     # =========================================================================
-    # 4. Apply language filter (improved)
+    # 4. Apply language filter
     # =========================================================================
     if language_filter and language_filter != "All":
         pre_filter_count = len(all_jobs)
         filtered_jobs = []
         for j in all_jobs:
             lang = j.get("language", "unknown")
-            desc = j.get("description") or ""
-            title = j.get("title") or ""
 
-            if lang == language_filter:
-                filtered_jobs.append(j)
-            elif lang == "unknown" and len(desc.strip()) < 50:
-                # No description — use title heuristics
-                title_lower = title.lower()
-                if language_filter == "English":
-                    german_patterns = [
-                        "(m/w/d)", "(m/w/x)", "(w/m/d)", "(w/m/x)",
-                        "bundesweit", "stellenangebot", "karriere",
-                        "plattform manager", "sachbearbeiter",
-                        "fachinformatiker", "kaufmann", "kauffrau",
-                    ]
-                    if not any(p in title_lower for p in german_patterns):
-                        filtered_jobs.append(j)
-                elif language_filter == "German":
-                    german_patterns = ["(m/w/d)", "(m/w/x)", "(w/m/d)"]
-                    if any(p in title_lower for p in german_patterns):
-                        filtered_jobs.append(j)
-                else:
+            if language_filter == "English":
+                # Keep: English, English (German plus), unknown with short desc
+                if lang in ("English", "English (German plus)"):
                     filtered_jobs.append(j)
-            elif lang == "unknown":
-                # Has description but language unknown — keep to be safe
-                filtered_jobs.append(j)
+                elif lang == "unknown":
+                    desc = j.get("description") or ""
+                    if len(desc.strip()) < 50:
+                        filtered_jobs.append(j)
+
+            elif language_filter == "English (German plus)":
+                # Only jobs where German is explicitly a plus
+                if lang == "English (German plus)":
+                    filtered_jobs.append(j)
+
+            elif language_filter == "German":
+                # Keep: German, English (German plus)
+                if lang in ("German", "English (German plus)"):
+                    filtered_jobs.append(j)
+
+            else:
+                # Other languages: exact match + unknown
+                if lang == language_filter or lang == "unknown":
+                    filtered_jobs.append(j)
 
         all_jobs = filtered_jobs
         filtered_count = pre_filter_count - len(all_jobs)

@@ -7,6 +7,13 @@ are defined here. Import from this module throughout the project.
 
 import os
 
+# Load .env file if it exists (for API keys)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — use env vars directly
+
 # =============================================================================
 # Search Defaults
 # =============================================================================
@@ -14,10 +21,19 @@ DEFAULT_SEARCH_TERM = "Product Owner"  # Legacy single-term (kept for compat)
 DEFAULT_SEARCH_TERMS = [
     "Product Owner",
     "Junior Product Owner",
-    "Scrum Master",
+    "Product Manager",
+    "Junior Product Manager",
     "Project Manager",
+    "Junior Project Manager",
+    "Scrum Master",
+    "Junior Scrum Master",
+    "Business Analyst",
+    "IT Business Analyst",
+    "Graduate IT",
+    "Business Informatics",
 ]
-DEFAULT_LOCATION = "Berlin"
+DEFAULT_LOCATION = ""  # Empty = whole country (used with Country scope)
+DEFAULT_LOCATION_SCOPE = "Country"  # Default scope: Country (not City)
 DEFAULT_COUNTRY = "Germany"
 DEFAULT_HOURS_OLD = 168  # 7 days
 DEFAULT_RESULTS_PER_SITE = 50
@@ -196,4 +212,11 @@ JOB_TYPE_OPTIONS = ["Any", "fulltime", "parttime", "contract", "internship"]
 # =============================================================================
 # Language filter options
 # =============================================================================
-LANGUAGE_FILTER_OPTIONS = ["All", "English", "German", "French", "Spanish"]
+LANGUAGE_FILTER_OPTIONS = [
+    "All",
+    "English",
+    "English (German plus)",
+    "German",
+    "French",
+    "Spanish",
+]
