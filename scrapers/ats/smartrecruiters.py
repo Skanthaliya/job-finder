@@ -10,6 +10,7 @@ No authentication required.
 
 import logging
 import re
+from datetime import datetime, timedelta
 from html import unescape
 
 from scrapers.ats.base import BaseATSScraper
@@ -108,6 +109,18 @@ class SmartRecruitersScraper(BaseATSScraper):
 
                 for item in content:
                     try:
+                        # Skip old jobs (> 90 days)
+                        cutoff_date = datetime.now() - timedelta(days=90)
+                        created = item.get("releasedDate") or item.get("createdOn") or ""
+                        if created:
+                            try:
+                                if isinstance(created, str):
+                                    post_date = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                                    if post_date.replace(tzinfo=None) < cutoff_date:
+                                        continue
+                            except Exception:
+                                pass
+
                         mapped = self._map_job(item, company_slug)
                         if mapped:
                             jobs.append(mapped)
@@ -165,12 +178,15 @@ class SmartRecruitersScraper(BaseATSScraper):
             job["is_remote"] = True
 
         # Job URL
-        job_ref = data.get("ref") or data.get("id") or data.get("uuid")
+        job_ref = data.get("ref") or ""
+        posting_id = data.get("id") or data.get("uuid") or ""
         custom_url = data.get("customCareerSiteUrl")
         if custom_url:
             job["job_url"] = custom_url
-        elif job_ref:
-            job["job_url"] = f"https://jobs.smartrecruiters.com/{company_slug}/{job_ref}"
+        elif job_ref and "api.smartrecruiters.com" not in job_ref:
+            job["job_url"] = job_ref
+        elif posting_id:
+            job["job_url"] = f"https://jobs.smartrecruiters.com/{company_slug}/{posting_id}"
         else:
             job["job_url"] = f"https://jobs.smartrecruiters.com/{company_slug}"
 

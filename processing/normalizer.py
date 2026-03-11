@@ -186,6 +186,14 @@ def _normalize_date(date_val) -> str | None:
     if not date_str:
         return None
 
+    # Convert Unix timestamps (all digits, 10+ chars)
+    if date_str.isdigit() and len(date_str) >= 10:
+        try:
+            ts = int(date_str[:10])
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        except (ValueError, OSError, OverflowError):
+            return None
+
     # Already ISO format
     if re.match(r"^\d{4}-\d{2}-\d{2}", date_str):
         return date_str[:10]

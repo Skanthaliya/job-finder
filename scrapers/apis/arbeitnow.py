@@ -148,10 +148,24 @@ def scrape_arbeitnow(
                 if isinstance(is_remote, str):
                     is_remote = is_remote.lower() in ("true", "yes", "1")
 
-                # Parse date
+                # Parse date — Arbeitnow returns Unix timestamps
                 date_posted = posting.get("created_at")
-                if date_posted and isinstance(date_posted, str):
-                    date_posted = date_posted[:10]  # YYYY-MM-DD
+                if date_posted is not None:
+                    if isinstance(date_posted, (int, float)):
+                        try:
+                            from datetime import datetime as dt
+                            date_posted = dt.fromtimestamp(int(date_posted)).strftime("%Y-%m-%d")
+                        except (ValueError, OSError, OverflowError):
+                            date_posted = None
+                    elif isinstance(date_posted, str):
+                        if date_posted.strip().isdigit() and len(date_posted.strip()) >= 10:
+                            try:
+                                from datetime import datetime as dt
+                                date_posted = dt.fromtimestamp(int(date_posted[:10])).strftime("%Y-%m-%d")
+                            except (ValueError, OSError, OverflowError):
+                                date_posted = None
+                        else:
+                            date_posted = date_posted[:10]  # Already ISO format
 
                 # Build job URL
                 job_url = posting.get("url") or posting.get("slug", "")

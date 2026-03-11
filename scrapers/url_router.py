@@ -55,6 +55,13 @@ def route_and_scrape(
 
     logger.info("URL Router: Classifying and routing %d URLs...", len(urls))
 
+    # Filter out junk URLs that aren't actual job postings
+    original_count = len(urls)
+    urls = _filter_valid_job_urls(urls)
+    if len(urls) < original_count:
+        logger.info("URL Router: Filtered %d junk URLs, %d valid remaining", 
+                    original_count - len(urls), len(urls))
+
     # Auto-save all discovered company slugs to registry
     from scrapers.company_registry import load_registry, save_registry, extract_ats_from_url
 
@@ -387,3 +394,58 @@ def _filter_by_terms_and_location(
         matched.append(job)
 
     return matched
+
+
+# Domains that are NOT actual job postings
+BLOCKED_DOMAINS = [
+    "facebook.com", "twitter.com", "x.com", "instagram.com", "tiktok.com",
+    "youtube.com", "reddit.com", "quora.com",
+    "linkedin.com/feed", "linkedin.com/posts", "linkedin.com/pulse",
+    "ziprecruiter.com/Jobs/", "ziprecruiter.com/jobs/",
+    "indeed.com/q-", "indeed.com/jobs?", "indeed.com/career",
+    "glassdoor.com/Job-", "glassdoor.com/job-listing",
+    "jobright.ai", "adzuna.com", "jooble.org", "talent.com",
+    "salary.com", "payscale.com", "levels.fyi",
+    "wikipedia.org", "medium.com", "substack.com",
+    "github.com", "stackoverflow.com", "stackexchange.com",
+    "crunchbase.com", "pitchbook.com",
+    "visa.co.uk/careers.html", "visa.com/careers.html",
+]
+
+# URL patterns that indicate an actual ATS job page
+VALID_ATS_PATTERNS = [
+    "myworkdayjobs.com",
+    "boards.greenhouse.io",
+    "jobs.lever.co",
+    "jobs.ashbyhq.com",
+    "jobs.personio.de",
+    "jobs.smartrecruiters.com",
+    "icims.com",
+    "taleo.net",
+    "breezy.hr",
+    "recruiting.paylocity.com",
+    "/job/", "/jobs/", "/career/", "/careers/",
+    "/position/", "/opening/", "/vacancy/",
+    "/apply", "/posting",
+    "job-board", "jobboard",
+]
+
+
+def _filter_valid_job_urls(urls: list[str]) -> list[str]:
+    """Filter out URLs that aren't actual job postings."""
+    valid = []
+    for url in urls:
+        url_lower = url.lower()
+
+        # Block known non-job domains
+        if any(domain in url_lower for domain in BLOCKED_DOMAINS):
+            logger.debug("Filtered blocked URL: %s", url[:80])
+            continue
+
+        # Must match at least one valid ATS/job pattern
+        if any(pattern in url_lower for pattern in VALID_ATS_PATTERNS):
+            valid.append(url)
+        else:
+            logger.debug("Filtered non-job URL: %s", url[:80])
+
+    return valid

@@ -185,6 +185,7 @@ def run_search(
             futures["serpapi"] = executor.submit(
                 _run_serpapi_safe,
                 search_terms, location, serpapi_key, _progress,
+                country, search_locations,
             )
 
         # Collect results
@@ -264,6 +265,120 @@ def run_search(
         all_jobs = filtered_jobs
         filtered_count = pre_filter_count - len(all_jobs)
         _progress(f"Language filter '{language_filter}': kept {len(all_jobs)}, removed {filtered_count}")
+
+    # =========================================================================
+    # 4.5 Apply location filter (for Country/Europe scope)
+    # =========================================================================
+    if search_locations:
+        pre_count = len(all_jobs)
+        loc_filters = [loc.lower() for loc in search_locations]
+        
+        # Add common city names for Germany
+        if "Germany" in search_locations or "germany" in loc_filters:
+            german_cities = [
+                "berlin", "munich", "münchen", "hamburg", "frankfurt", 
+                "cologne", "köln", "düsseldorf", "stuttgart", "dresden",
+                "leipzig", "hannover", "nuremberg", "nürnberg", "dortmund",
+                "essen", "bremen", "bonn", "mannheim", "karlsruhe",
+                "freiburg", "heidelberg", "mainz", "wiesbaden", "potsdam",
+                "rostock", "kiel", "augsburg", "aachen", "regensburg",
+                "darmstadt", "wolfsburg", "ingolstadt", "ulm", "bielefeld",
+            ]
+            loc_filters.extend(german_cities)
+        
+        # Countries where user CAN work remotely from
+        ALLOWED_REMOTE_COUNTRIES = [
+            "germany", "austria", "switzerland", "netherlands", "belgium",
+            "france", "uk", "united kingdom", "ireland", "sweden", "denmark",
+            "norway", "finland", "spain", "italy", "portugal", "poland",
+            "czech republic", "luxembourg", "estonia", "latvia", "lithuania",
+            "india", "europe", "eu", "emea", "eea", "dach",
+        ]
+        
+        # Keywords meaning truly global remote (no country restriction)
+        GLOBAL_REMOTE_KEYWORDS = [
+            "worldwide", "anywhere", "global", "work from anywhere",
+            "fully remote", "100% remote", "remote-first",
+        ]
+        
+        # Countries the user CANNOT work from remotely
+        BLOCKED_REMOTE_COUNTRIES = [
+            "united states", "usa", "u.s.", "us only",
+            "canada only", "australia only", "japan only",
+            "china only", "korea only", "brazil only",
+            "latin america", "latam only",
+        ]
+        
+        filtered_jobs = []
+        for j in all_jobs:
+            job_loc = (j.get("location") or "").lower()
+            job_title = (j.get("title") or "").lower()
+            is_remote_flag = j.get("is_remote", False)
+            
+            # --- REMOTE JOB HANDLING ---
+            is_remote_job = (
+                is_remote_flag
+                or "remote" in job_loc
+                or "remote" in job_title
+                or "home office" in job_loc
+                or "wfh" in job_loc
+            )
+            
+            if is_remote_job:
+                # Check if remote is restricted to a blocked country
+                is_blocked_remote = any(
+                    blocked in job_loc for blocked in BLOCKED_REMOTE_COUNTRIES
+                )
+                
+                if is_blocked_remote:
+                    logger.debug("Blocked remote: %s | %s", 
+                               j.get("title", "?")[:40], job_loc[:40])
+                    continue
+                
+                # Check if remote is in an allowed country or global
+                is_global = any(kw in job_loc for kw in GLOBAL_REMOTE_KEYWORDS)
+                is_allowed = any(c in job_loc for c in ALLOWED_REMOTE_COUNTRIES)
+                is_no_location = len(job_loc.replace("remote", "").strip(" -,/")) < 3
+                
+                if is_global or is_allowed or is_no_location:
+                    filtered_jobs.append(j)
+                    continue
+                
+                # Remote with unknown location — keep (benefit of doubt)
+                filtered_jobs.append(j)
+                continue
+            
+            # --- NON-REMOTE JOB HANDLING ---
+            
+            # No location info — keep
+            if not job_loc or len(job_loc.strip()) < 2:
+                filtered_jobs.append(j)
+                continue
+            
+            # Location matches our country/city filter
+            if any(loc in job_loc for loc in loc_filters):
+                filtered_jobs.append(j)
+                continue
+            
+            # German locale codes
+            if ", de" in job_loc or "germany" in job_loc or "deutschland" in job_loc:
+                filtered_jobs.append(j)
+                continue
+            
+            # If Europe scope — keep all (multiple countries selected)
+            if len(search_locations) > 1:
+                filtered_jobs.append(j)
+                continue
+            
+            # Doesn't match — filter out
+            logger.debug("Location filtered: %s | %s", 
+                        j.get("title", "?")[:40], job_loc[:40])
+        
+        all_jobs = filtered_jobs
+        removed = pre_count - len(all_jobs)
+        if removed > 0:
+            _progress(f"Location filter: removed {removed} jobs outside {search_locations[0]} "
+                     f"(kept valid remote + EU/India remote)")
 
     # =========================================================================
     # 5. Deduplicate
@@ -451,15 +566,24 @@ def _run_serpapi_safe(
     search_terms: list[str], location: str,
     serpapi_key: str,
     progress_callback: Callable[[str], None],
+    country: str = "",
+    search_locations: list[str] | None = None,
 ) -> list[dict]:
     """Safely run SerpAPI dorking + URL routing."""
     try:
         from scrapers.serpapi_dorker import run_serpapi_dorks
         from scrapers.url_router import route_and_scrape
 
+        # Use country name when location is empty (Country scope)
+        serpapi_location = location
+        if not serpapi_location and search_locations:
+            serpapi_location = search_locations[0]  # e.g., "Germany"
+        if not serpapi_location and country:
+            serpapi_location = country
+
         urls = run_serpapi_dorks(
             search_terms=search_terms,
-            location=location,
+            location=serpapi_location,
             serpapi_key=serpapi_key,
             progress_callback=progress_callback,
         )
@@ -472,11 +596,10 @@ def _run_serpapi_safe(
         except Exception:
             pass
 
-        # Route URLs to ATS scrapers
         jobs = route_and_scrape(
             urls=urls,
             search_terms=search_terms,
-            location=location,
+            location=serpapi_location,
             progress_callback=progress_callback,
         )
 

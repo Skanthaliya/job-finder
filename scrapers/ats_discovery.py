@@ -388,10 +388,16 @@ def _safe_scrape_workday(
         from scrapers.ats.workday import scrape_workday_company
 
         all_jobs = scrape_workday_company(base_url)
-        if not all_jobs:
+
+        if all_jobs:
+            logger.info("Workday %s: %d total jobs fetched from %s", 
+                       company_name, len(all_jobs), base_url[:60])
+        else:
+            logger.info("Workday %s: 0 jobs (URL may be wrong: %s)", 
+                       company_name, base_url[:60])
             return []
 
-        # Filter by search terms and location (same logic as _safe_scrape)
+        # Filter by search terms and location
         matched = []
         search_terms_lower = [t.lower() for t in search_terms]
         for job in all_jobs:
@@ -420,8 +426,11 @@ def _safe_scrape_workday(
             job["company"] = job.get("company") or company_name
             matched.append(job)
 
+        if matched:
+            logger.info("Workday %s: %d jobs matched filters", company_name, len(matched))
+
         return matched
     except Exception as e:
-        # Use debug, not error — many Workday URLs may be wrong, that's expected
-        logger.debug("Workday %s failed: %s", company_name, e)
+        logger.info("Workday %s FAILED: %s (URL: %s)", 
+                   company_name, str(e)[:80], base_url[:60])
         return []
