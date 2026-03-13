@@ -147,7 +147,7 @@ class SmartRecruitersScraper(BaseATSScraper):
             return None
 
         job = self._empty_job()
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "smartrecruiters"
         job["title"] = data.get("name") or data.get("title")
 

@@ -30,6 +30,8 @@ from config import (
     JOB_TYPE_OPTIONS,
     LANGUAGE_FILTER_OPTIONS,
     JOBSPY_SITES,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,10 @@ if "search_running" not in st.session_state:
     st.session_state.search_running = False
 if "progress_messages" not in st.session_state:
     st.session_state.progress_messages = []
+if "ai_scores_done" not in st.session_state:
+    st.session_state.ai_scores_done = False
+if "cover_letters" not in st.session_state:
+    st.session_state.cover_letters = {}
 
 
 # =============================================================================
@@ -232,6 +238,27 @@ with st.sidebar:
     if language_filter == "All":
         language_filter = None
 
+    st.divider()
+
+    # AI Features
+    st.markdown("### 🤖 AI Features (Gemini)")
+
+    gemini_api_key = st.text_input(
+        "Gemini API Key",
+        value=GEMINI_API_KEY,
+        type="password",
+        help="Get a free key at https://aistudio.google.com/apikey",
+    )
+
+    st.markdown("**Your CV / Profile**")
+    st.caption("Paste your CV text below. If empty, falls back to `my_profile.txt` → `my_profile.json`.")
+    cv_text_input = st.text_area(
+        "CV Text",
+        height=150,
+        placeholder="Paste your full CV / resume text here...",
+        label_visibility="collapsed",
+    )
+
 
 # =============================================================================
 # Build jobspy_sites list
@@ -290,6 +317,8 @@ if search_clicked:
     st.session_state.search_results = None
     st.session_state.output_filepath = None
     st.session_state.progress_messages = []
+    st.session_state.ai_scores_done = False
+    st.session_state.cover_letters = {}
 
     # Set up logging for Streamlit
     from main import setup_logging, run_search
@@ -362,6 +391,18 @@ if st.session_state.search_results is not None:
     else:
         st.success(f"Found **{len(jobs)}** jobs!")
 
+        # --- Load AI profile early so it's available in expanders ---
+        from ai.profile_loader import load_profile
+        profile_text = load_profile(cv_text_input)
+        gemini_model = None
+        if gemini_api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_api_key)
+                gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+            except Exception as e:
+                logger.warning("Failed to initialize Gemini: %s", e)
+
         # --- Metrics Row ---
         col1, col2, col3, col4 = st.columns(4)
 
@@ -418,15 +459,24 @@ if st.session_state.search_results is not None:
         # Prepare DataFrame for display
         display_cols = [
             "title", "company", "location", "source", "date_posted",
-            "job_type", "is_remote", "language", "salary_min", "salary_max",
-            "salary_currency", "job_url",
+            "job_type", "experience_level", "is_remote", "language",
+            "salary_min", "salary_max", "salary_currency", "job_url",
         ]
+        if st.session_state.ai_scores_done:
+            display_cols.insert(0, "ai_score")
         df = pd.DataFrame(jobs)
         available_cols = [c for c in display_cols if c in df.columns]
         display_df = df[available_cols].copy()
 
         # Configure column display
         column_config = {
+            "ai_score": st.column_config.ProgressColumn(
+                "AI Score",
+                min_value=0,
+                max_value=100,
+                format="%d",
+                width="small",
+            ),
             "job_url": st.column_config.LinkColumn(
                 "Job URL",
                 display_text="Open →",
@@ -451,15 +501,49 @@ if st.session_state.search_results is not None:
             hide_index=True,
         )
 
-        # --- Job Detail Expanders ---
-        st.markdown("### 📄 Job Descriptions")
+        # --- Unified Job Detail Expanders ---
+        st.markdown("### 📄 Job Details")
         st.caption("Click on a job to expand and view its full description.")
 
-        for i, job in enumerate(jobs[:50]):  # Limit to first 50 for performance
+        scored = st.session_state.ai_scores_done
+
+        for i, job in enumerate(jobs[:50]):
             title = job.get("title", "Untitled")
             company = job.get("company", "Unknown")
-            location = job.get("location", "")
-            with st.expander(f"**{title}** at {company} — {location}"):
+            location_str = job.get("location", "")
+            score = job.get("ai_score", 0)
+
+            if scored:
+                if score >= 70:
+                    badge = f"🟢 {score}"
+                elif score >= 40:
+                    badge = f"🟡 {score}"
+                else:
+                    badge = f"🔴 {score}"
+                label = f"{badge} — **{title}** at {company} — {location_str}"
+            else:
+                label = f"**{title}** at {company} — {location_str}"
+
+            with st.expander(label):
+                if scored:
+                    st.markdown(f"**AI Score:** {score}/100")
+                    st.markdown(f"**Reasoning:** {job.get('ai_reasoning', 'N/A')}")
+
+                    pros = job.get("ai_pros", [])
+                    cons = job.get("ai_cons", [])
+                    if pros or cons:
+                        pro_col, con_col = st.columns(2)
+                        with pro_col:
+                            st.markdown("**Pros:**")
+                            for p in pros:
+                                st.markdown(f"- {p}")
+                        with con_col:
+                            st.markdown("**Cons:**")
+                            for c in cons:
+                                st.markdown(f"- {c}")
+
+                    st.markdown("---")
+
                 meta_col1, meta_col2, meta_col3 = st.columns(3)
                 with meta_col1:
                     st.write(f"**Source:** {job.get('source', 'N/A')}")
@@ -482,13 +566,48 @@ if st.session_state.search_results is not None:
                 desc = job.get("description", "")
                 if desc:
                     st.markdown("---")
-                    # Render as HTML if it contains HTML tags, otherwise as text
                     if "<" in desc and ">" in desc:
                         st.html(f'<div style="max-height:400px;overflow-y:auto;font-size:0.9rem;">{desc}</div>')
                     else:
                         st.text(desc[:5000])
                 else:
                     st.info("No description available.")
+
+                # Cover letter (only when AI is configured and scoring is done)
+                if scored and gemini_model and profile_text:
+                    st.markdown("---")
+                    job_lang = job.get("language", "English")
+                    cover_lang = "German" if "German" in (job_lang or "") else "English"
+                    job_key = job.get("job_url", f"job_{i}")
+
+                    if job_key in st.session_state.cover_letters:
+                        st.markdown("**Generated Cover Letter:**")
+                        letter = st.session_state.cover_letters[job_key]
+                        st.text_area(
+                            "Cover Letter",
+                            value=letter,
+                            height=300,
+                            key=f"cl_display_{i}",
+                            label_visibility="collapsed",
+                        )
+                        st.download_button(
+                            "📥 Download Cover Letter",
+                            data=letter,
+                            file_name=f"cover_letter_{company.replace(' ', '_')}_{title.replace(' ', '_')[:30]}.txt",
+                            mime="text/plain",
+                            key=f"cl_download_{i}",
+                        )
+                    else:
+                        if st.button(f"📝 Generate Cover Letter ({cover_lang})", key=f"cl_btn_{i}"):
+                            from ai.cover_letter import generate_cover_letter
+                            with st.spinner("Generating cover letter..."):
+                                letter = generate_cover_letter(
+                                    job, profile_text, gemini_model, language=cover_lang,
+                                )
+                            st.session_state.cover_letters[job_key] = letter
+                            job["ai_cover_letter"] = letter
+                            st.session_state.search_results = jobs
+                            st.rerun()
 
         if len(jobs) > 50:
             st.info(f"Showing first 50 of {len(jobs)} jobs. Download the Excel file for all results.")
@@ -522,10 +641,8 @@ if st.session_state.search_results is not None:
             )
 
     # =========================================================================
-    # Phase 2 Placeholder
+    # Company Registry Stats
     # =========================================================================
-
-    # Show auto-discovery stats
     try:
         from scrapers.company_registry import load_registry as _load_reg
         registry = _load_reg()
@@ -535,7 +652,6 @@ if st.session_state.search_results is not None:
             st.markdown("### 📦 Company Registry")
             st.caption(f"Total companies tracked: {total}")
 
-            # Show breakdown by ATS
             ats_counts = {}
             for v in registry["companies"].values():
                 ats = v.get("ats", "unknown")
@@ -546,7 +662,6 @@ if st.session_state.search_results is not None:
                 with cols[i % len(cols)]:
                     st.metric(ats.title(), count)
 
-            # Show recently discovered
             recent = sorted(
                 registry["companies"].values(),
                 key=lambda x: x.get("discovered_date", ""),
@@ -561,23 +676,115 @@ if st.session_state.search_results is not None:
     except Exception:
         pass
 
+    # =========================================================================
+    # AI Features — Scoring & Cover Letters
+    # =========================================================================
     st.divider()
-    st.markdown("### 🤖 AI Features — Coming in Phase 2")
-    st.markdown(
-        """
-        <div style="background-color: #f0f0f0; border-radius: 10px; padding: 20px;
-                    border: 2px dashed #ccc; color: #999; text-align: center;">
-            <h4 style="color: #999;">Powered by Google Gemini AI</h4>
-            <p>🎯 <b>Job Scoring</b> — Rate each job against your profile (1-100)</p>
-            <p>📝 <b>Cover Letter Generation</b> — AI-written tailored cover letters</p>
-            <p>📄 <b>Resume Tailoring</b> — Custom bullet points for each job</p>
-            <p style="margin-top: 15px; font-size: 0.9rem;">
-                Fill in <code>my_profile.json</code> with your resume data to prepare for Phase 2.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("### 🤖 AI Job Scoring & Cover Letters")
+
+    if not gemini_api_key:
+        st.warning("Enter your Gemini API key in the sidebar to enable AI features.")
+    elif not profile_text:
+        st.warning(
+            "Paste your CV text in the sidebar, or create a `my_profile.txt` file "
+            "in the project root, to enable AI scoring."
+        )
+    elif not gemini_model:
+        st.error("Failed to initialize Gemini AI. Check your API key.")
+    else:
+        st.caption(f"Profile loaded ({len(profile_text)} characters)")
+
+        # --- Score All Jobs ---
+        score_col1, score_col2 = st.columns([2, 3])
+        with score_col1:
+            score_clicked = st.button(
+                "🎯 Score All Jobs",
+                type="primary",
+                use_container_width=True,
+                disabled=st.session_state.ai_scores_done,
+            )
+        with score_col2:
+            if st.session_state.ai_scores_done:
+                st.success("Scoring complete! Jobs are sorted by AI score.")
+            else:
+                st.caption(
+                    f"Scores each job 1-100 against your profile using {GEMINI_MODEL}. "
+                    f"This takes ~{len(jobs) * 4 // 60 + 1} min for {len(jobs)} jobs."
+                )
+
+        if score_clicked and not st.session_state.ai_scores_done:
+            from ai.scorer import score_jobs_batch
+
+            progress_bar = st.progress(0, text="Starting AI scoring...")
+            status_text = st.empty()
+
+            def scoring_progress(msg: str) -> None:
+                try:
+                    import re as _re
+                    m = _re.search(r"(\d+)-\d+ of (\d+)", msg)
+                    if m:
+                        current = int(m.group(1))
+                        total_jobs = int(m.group(2))
+                        pct = min(current / total_jobs, 0.99)
+                        progress_bar.progress(pct, text=msg)
+                    else:
+                        status_text.caption(msg)
+                except Exception:
+                    pass
+
+            try:
+                scored_jobs = score_jobs_batch(
+                    jobs, profile_text, gemini_model, progress_callback=scoring_progress,
+                )
+                st.session_state.search_results = scored_jobs
+                st.session_state.ai_scores_done = True
+                progress_bar.progress(1.0, text="Scoring complete! Re-exporting Excel...")
+
+                from output.excel_writer import write_excel
+                new_filepath = write_excel(scored_jobs)
+                st.session_state.output_filepath = new_filepath
+                logger.info("Re-exported Excel with AI scores: %s", new_filepath)
+
+                status_text.empty()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Scoring failed: {e}")
+                logger.error("AI scoring failed: %s", e, exc_info=True)
+
+        # --- Scored Results Table ---
+        if st.session_state.ai_scores_done:
+            st.markdown("#### 🏆 Top Matches")
+
+            scored_df_data = []
+            for j in jobs:
+                scored_df_data.append({
+                    "Score": j.get("ai_score", 0),
+                    "Title": j.get("title", ""),
+                    "Company": j.get("company", ""),
+                    "Location": j.get("location", ""),
+                    "Language": j.get("language", ""),
+                    "Reasoning": j.get("ai_reasoning", ""),
+                })
+
+            scored_df = pd.DataFrame(scored_df_data)
+
+            def color_score(val):
+                if isinstance(val, (int, float)):
+                    if val >= 70:
+                        return "background-color: #c6efce; color: #006100"
+                    elif val >= 40:
+                        return "background-color: #ffeb9c; color: #9c5700"
+                    else:
+                        return "background-color: #ffc7ce; color: #9c0006"
+                return ""
+
+            styled_df = scored_df.style.applymap(color_score, subset=["Score"])
+            st.dataframe(
+                styled_df,
+                use_container_width=True,
+                height=400,
+                hide_index=True,
+            )
 
 # =============================================================================
 # Footer

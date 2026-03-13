@@ -103,6 +103,7 @@ class BaseATSScraper(ABC):
             "country": None,
             "date_posted": None,
             "job_type": None,
+            "experience_level": None,
             "is_remote": None,
             "salary_min": None,
             "salary_max": None,

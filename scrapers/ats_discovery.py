@@ -51,20 +51,12 @@ GREENHOUSE_COMPANIES = [
 ]
 
 LEVER_COMPANIES = [
-    "Netflix", "anthropic", "figma", "notion",
-    "netlify", "webflow", "postman", "airtable",
-    "brex", "rippling", "gusto", "ramp",
-    "databricks", "scale", "replit", "vercel",
-    "gorillas", "flink", "wolt", "getir",
-    "klarna", "adyen", "mollie", "sumup",
-    "wise", "revolut", "monzo", "starling",
-    "messagebird", "miro", "productboard",
-    "typeform", "aiven", "storyblok",
-    "pitch", "rows", "wonder",
-    "personio", "contentful", "commercetools",
-    "celonis", "babbel", "adjust",
-    "sennder", "forto", "freighthub",
-    "lilium", "volocopter", "isar-aerospace",
+    # Cleaned: removed ~30 slugs that are already in Greenhouse/Ashby/Personio
+    "Netflix", "webflow", "postman", "airtable",
+    "brex", "rippling", "gusto",
+    "databricks", "scale",
+    "sumup", "wise", "revolut", "monzo", "starling",
+    "rows", "wonder", "commercetools", "freighthub",
 ]
 
 ASHBY_COMPANIES = [

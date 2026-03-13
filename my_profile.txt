@@ -1,0 +1,9 @@
+Paste all your CV / resume content here.
+
+You can include multiple CVs — just separate them with a line of dashes.
+The AI will use all the text to understand your background and score jobs accordingly.
+
+Delete everything above this line and paste your real CV text below:
+
+---
+

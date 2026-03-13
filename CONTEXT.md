@@ -6,7 +6,7 @@
 - **Latest commit:** `2fd3e63` (2026-03-13) — "context handoff"
 - **Language:** Python 3.12+
 - **GUI:** Streamlit
-- **Status:** Phase 1 COMPLETE ✅ — Core job search working. Phase 2 (AI) NOT started.
+- **Status:** Phase 1 COMPLETE ✅ — Core job search working. Phase 2 (AI) ACTIVE ✅ — Scoring & cover letters working.
 
 ---
 
@@ -54,8 +54,9 @@ job-finder/
 ├── config.py                          # All defaults, constants, ATS patterns
 ├── main.py                            # CLI + orchestrator (run_search function)
 ├── app.py                             # Streamlit GUI
-├── my_profile.json                    # User resume template (for AI Phase 2)
-├── requirements.txt                   # python-jobspy, streamlit, langdetect, etc.
+├── my_profile.json                    # User resume template (structured JSON fallback)
+├── my_profile.txt                     # Plain text CV backup (paste all CVs here)
+├── requirements.txt                   # python-jobspy, streamlit, langdetect, google-generativeai, etc.
 ├── .env.example                       # Template for required env vars (SERPAPI_KEY, GEMINI_API_KEY)
 ├── .gitignore                         # venv, output, .env, registry files
 ├── README.md                          # User-facing documentation
@@ -87,10 +88,12 @@ job-finder/
 ├── output/
 │   ├── excel_writer.py               # 3-sheet Excel (summary, full, AI placeholder)
 │   └── csv_writer.py                 # CSV fallback
-└── ai/                                # Phase 2 — ALL STUBS (NotImplementedError)
-    ├── scorer.py                      # Gemini job scoring (0-100)
-    ├── cover_letter.py                # Gemini cover letter generation
-    └── resume_tailor.py               # Gemini resume bullet tailoring
+└── ai/                                # Phase 2 — ACTIVE (scoring + cover letters working)
+    ├── __init__.py                    # Package exports
+    ├── profile_loader.py              # Loads CV text: sidebar → my_profile.txt → my_profile.json
+    ├── scorer.py                      # Gemini job scoring (1-100) with batch support
+    ├── cover_letter.py                # Gemini cover letter generation (auto-detects language)
+    └── resume_tailor.py               # Gemini resume bullet tailoring (STUB — not yet implemented)
 ```
 
 ---
@@ -148,54 +151,40 @@ job-finder/
 
 ---
 
-## Phase 2 — NOT STARTED — AI Features
+## Phase 2 — ACTIVE — AI Features
 
-All files in `ai/` are **stubs** that raise `NotImplementedError`.
+### What's Working
 
-### Interfaces Already Defined
+**1. `ai/profile_loader.py` — CV/Profile Loading**
+- Priority: sidebar text box → `my_profile.txt` → `my_profile.json`
+- User can paste all CVs into the sidebar text area or keep a `my_profile.txt` backup file
+- JSON profile is flattened to plain text for the LLM
 
-```python
-# ai/scorer.py
-score_job(job: dict, profile: dict) -> dict       # {score: 0-100, reasoning, pros, cons}
-score_jobs_batch(jobs, profile, top_n=50) -> list  # Score all, return top N
+**2. `ai/scorer.py` — Job Scoring with Gemini**
+- Uses `google-generativeai` with model `gemini-2.0-flash`
+- Scores each job 1-100 against the user's CV text
+- Batch scoring (5 jobs per API call) to reduce API usage
+- Structured JSON output: `{score, reasoning, pros, cons}`
+- Rate limited at 4s between calls (safe for 15 RPM free tier)
+- Robust JSON parsing: handles markdown fences, extracts JSON from mixed text
 
-# ai/cover_letter.py
-generate_cover_letter(job, profile, language="English") -> str  # 3-4 paragraphs, <400 words
-
-# ai/resume_tailor.py
-generate_tailored_bullets(job, profile) -> str     # Rewrite bullets to match job keywords
-```
-
-### What Needs To Be Built
-
-**1. `ai/scorer.py` — Job Scoring with Gemini**
-- Use `google-generativeai` package with model `gemini-2.0-flash`
-- Read `GEMINI_API_KEY` from env var or `.env`
-- Rate limit: 0.5s delay between API calls
-- Parse JSON from Gemini response (handle markdown-wrapped JSON)
-
-**2. `ai/cover_letter.py` — Cover Letter Generation**
-- Language parameter determines output language (English/German)
-- 3-4 paragraphs, professional tone, under 400 words
-- Must NOT fabricate experience — use only what's in profile
-
-**3. `ai/resume_tailor.py` — Resume Bullet Tailoring**
-- Rewrite resume bullets to match job keywords
-- Truthful only — no fabrication
+**3. `ai/cover_letter.py` — Cover Letter Generation**
+- One-click generation per job in the Streamlit UI
+- Auto-detects output language from the job's `language` field (English/German/French/Dutch/Spanish)
+- Professional tone, 3-4 paragraphs, tailored to job description
+- Uses candidate's actual CV data — no fabrication
 
 **4. `app.py` — AI Section in GUI**
-- Replace Phase 2 placeholder with actual UI
-- Text input for GEMINI_API_KEY (masked)
-- "Score Jobs" button → progress bar → sorted results with ai_score
-- For top-10 jobs: expandable sections with score, reasoning, cover letter button, resume button
-- Download updated Excel with AI columns filled
+- Sidebar: Gemini API key input (masked) + CV text area
+- "Score All Jobs" button with progress bar
+- Results table includes `ai_score` column with color-coded progress bars
+- Scored results table: green (70+), yellow (40-69), red (<40)
+- Job expanders show score badge, reasoning, pros/cons
+- Per-job "Generate Cover Letter" button with text area display and download
 
-**5. `output/excel_writer.py` — AI Results Sheet**
-- When AI data present, populate Sheet 3 with scores, cover letters
-- Conditional formatting: green >70, yellow >40, red ≤40
+### What's Still a Stub
 
-**6. `my_profile.json` — User fills in their real data**
-- Template exists but needs user's actual resume data
+**`ai/resume_tailor.py`** — Resume bullet tailoring (raises `NotImplementedError`)
 
 ---
 
@@ -213,6 +202,7 @@ Every job in the pipeline uses this exact schema:
     "country": str | None,
     "date_posted": str | None,  # ISO format "2026-03-09"
     "job_type": str | None,     # "fulltime", "parttime", "contract", "internship"
+    "experience_level": str | None, # "intern", "entry", "junior", "mid", "senior", "lead", "director", etc.
     "is_remote": bool | None,
     "salary_min": float | None,
     "salary_max": float | None,
@@ -222,8 +212,8 @@ Every job in the pipeline uses this exact schema:
     "company_url": str | None,
     "description": str | None,  # Full job description text
     "language": str | None,     # "English", "German", "English (German plus)", "unknown"
-    "ai_score": int | None,     # Phase 2
-    "ai_reasoning": str | None, # Phase 2
+    "ai_score": int | None,     # Phase 2 — populated by ai/scorer.py (1-100)
+    "ai_reasoning": str | None, # Phase 2 — populated by ai/scorer.py
     "ai_cover_letter": str | None, # Phase 2
     "ai_resume_bullets": str | None, # Phase 2
 }
@@ -399,7 +389,8 @@ python3 main.py --search "Product Owner" --scope country --country Germany --res
 | `config.py` | All constants, defaults, ATS patterns, HTTP settings | Yes |
 | `main.py` | CLI entry point + `run_search()` orchestrator | Yes |
 | `app.py` | Streamlit web GUI | Yes |
-| `my_profile.json` | User resume template for AI Phase 2 | Placeholder |
+| `my_profile.json` | User resume template (structured JSON fallback for AI) | Fallback |
+| `my_profile.txt` | Plain text CV backup — paste all CVs here | Fallback |
 | `scrapers/jobspy_scraper.py` | python-jobspy wrapper, `_map_jobspy_row()` helper | Yes |
 | `scrapers/ats_discovery.py` | Direct ATS API calls for 250+ companies | Yes |
 | `scrapers/serpapi_dorker.py` | SerpAPI Google dorking with quota tracking | Yes |
@@ -422,9 +413,10 @@ python3 main.py --search "Product Owner" --scope country --country Germany --res
 | `processing/deduplicator.py` | URL + title/company deduplication, source merging | Yes |
 | `output/excel_writer.py` | 3-sheet Excel with formatting, hyperlinks, auto-width | Yes |
 | `output/csv_writer.py` | CSV fallback output | Yes |
-| `ai/scorer.py` | Gemini job scoring — STUB (NotImplementedError) | No |
-| `ai/cover_letter.py` | Gemini cover letter generation — STUB | No |
-| `ai/resume_tailor.py` | Gemini resume bullet tailoring — STUB | No |
+| `ai/profile_loader.py` | Loads CV text: sidebar → my_profile.txt → my_profile.json | Yes |
+| `ai/scorer.py` | Gemini job scoring (1-100) with batch support | Yes |
+| `ai/cover_letter.py` | Gemini cover letter generation (auto-detects language) | Yes |
+| `ai/resume_tailor.py` | Gemini resume bullet tailoring — STUB (not yet implemented) | No |
 
 ---
 
@@ -456,12 +448,12 @@ python3 main.py --search "Product Owner" --scope country --country Germany --res
 - Either find correct slugs or remove dead entries
 - SerpAPI will discover real Lever companies over time anyway
 
-### Priority 3: Build AI Phase 2
-- Implement `ai/scorer.py` with Gemini API
-- Implement `ai/cover_letter.py`
-- Implement `ai/resume_tailor.py`
-- Add AI section to `app.py` GUI
-- User needs to fill `my_profile.json` with real resume data
+### Priority 3: Build AI Phase 2 — ✅ DONE (scoring + cover letters)
+- ✅ `ai/scorer.py` — Gemini batch scoring (1-100) with structured JSON output
+- ✅ `ai/cover_letter.py` — Gemini cover letter generation (auto language detection)
+- ✅ `ai/profile_loader.py` — CV text loading (sidebar text box → my_profile.txt → my_profile.json)
+- ✅ AI section in `app.py` GUI (scoring button, progress bar, cover letter per job)
+- Remaining: `ai/resume_tailor.py` (still a stub)
 
 ### Priority 4: Application Prep System
 - Generate `.docx` cover letters (not FlowCV — no API)

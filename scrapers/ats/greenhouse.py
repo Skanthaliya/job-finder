@@ -139,7 +139,7 @@ class GreenhouseScraper(BaseATSScraper):
 
         job = self._empty_job()
 
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "greenhouse"
         job["title"] = data.get("title")
 

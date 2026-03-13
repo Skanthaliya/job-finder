@@ -137,7 +137,7 @@ class LeverScraper(BaseATSScraper):
 
         job = self._empty_job()
 
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "lever"
         job["title"] = data.get("text")
         job["company"] = company_slug.replace("-", " ").title()

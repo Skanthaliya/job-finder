@@ -1,0 +1,27 @@
+You are a professional career consultant. Write a tailored cover letter for the CANDIDATE applying to the JOB below.
+
+CANDIDATE PROFILE:
+{profile}
+
+JOB DETAILS:
+Title: {title}
+Company: {company}
+Location: {location}
+Type: {job_type}
+Remote: {is_remote}
+Language requirement: {language}
+Description:
+{description}
+
+INSTRUCTIONS:
+- Write the cover letter in {output_language}.
+- Use a professional but warm tone.
+- Highlight the candidate's most relevant skills and experience for THIS specific job.
+- Reference specific requirements from the job description.
+- Keep it concise: 3-4 paragraphs, roughly 250-350 words.
+- Do NOT include placeholder brackets like [Your Name] — use the candidate's actual details from the profile.
+- Do NOT include a subject line or email headers — just the letter body.
+- Start with "Dear Hiring Manager," (or equivalent in the target language).
+- End with a professional closing.
+
+Write the cover letter now:

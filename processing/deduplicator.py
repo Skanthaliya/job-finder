@@ -2,7 +2,8 @@
 processing/deduplicator.py — Deduplication logic for job results.
 
 Identifies duplicate jobs by URL or by title+company match, merges data
-from duplicates, and returns a deduplicated list.
+from duplicates, and returns a deduplicated list. Uses fuzzy title
+normalization to catch variants like "Sr." vs "Senior".
 """
 
 import logging
@@ -10,6 +11,43 @@ import re
 from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
+
+# Common title abbreviation mappings for fuzzy matching
+TITLE_NORMALIZATIONS = {
+    r"\bsr\.?\b": "senior",
+    r"\bjr\.?\b": "junior",
+    r"\bmgr\.?\b": "manager",
+    r"\beng\.?\b": "engineer",
+    r"\bdev\.?\b": "developer",
+    r"\bdir\.?\b": "director",
+    r"\bvp\b": "vice president",
+    r"\bassoc\.?\b": "associate",
+    r"\basst\.?\b": "assistant",
+    r"\badmin\.?\b": "administrator",
+    r"\bcoord\.?\b": "coordinator",
+    r"\bspec\.?\b": "specialist",
+    r"\bexec\.?\b": "executive",
+    r"\bops\.?\b": "operations",
+    r"\btech\.?\b": "technical",
+    r"\bswe\b": "software engineer",
+    r"\bpm\b": "product manager",
+    r"\bpo\b": "product owner",
+    r"\bba\b": "business analyst",
+    r"\bqa\b": "quality assurance",
+    r"\bux\b": "user experience",
+    r"\bui\b": "user interface",
+}
+
+# Suffixes to strip from titles for comparison (gender markers, etc.)
+TITLE_STRIP_PATTERNS = [
+    r"\s*\(m/[wf]/[dx]\)\s*",
+    r"\s*\([wf]/m/[dx]\)\s*",
+    r"\s*\(m/f/[dx]\)\s*",
+    r"\s*\([fm]/[fm]/[dx]\)\s*",
+    r"\s*\(all\s+genders?\)\s*",
+    r"\s*\(d/f/m\)\s*",
+    r"\s*-\s*(m/w/d|f/m/d|w/m/d)\s*$",
+]
 
 
 def deduplicate(jobs: list[dict]) -> list[dict]:
@@ -47,7 +85,9 @@ def deduplicate(jobs: list[dict]) -> list[dict]:
         company = (job.get("company") or "").lower().strip()
 
         normalized_url = _normalize_url(job_url)
-        title_company_key = f"{title}|||{company}" if title and company else None
+        norm_title = _normalize_title(title)
+        norm_company = _normalize_company(company)
+        title_company_key = f"{norm_title}|||{norm_company}" if norm_title and norm_company else None
 
         # Check if duplicate by URL
         existing_idx = None
@@ -104,6 +144,47 @@ def _normalize_url(url: str) -> str:
         return url.lower().rstrip("/")
 
 
+def _normalize_title(title: str) -> str:
+    """
+    Normalize a job title for fuzzy dedup comparison.
+
+    Expands abbreviations (Sr. -> senior), strips gender markers like (m/w/d),
+    and removes extra whitespace.
+    """
+    if not title:
+        return ""
+
+    normalized = title.lower().strip()
+
+    for pattern in TITLE_STRIP_PATTERNS:
+        normalized = re.sub(pattern, "", normalized, flags=re.IGNORECASE)
+
+    for abbrev, expansion in TITLE_NORMALIZATIONS.items():
+        normalized = re.sub(abbrev, expansion, normalized, flags=re.IGNORECASE)
+
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _normalize_company(company: str) -> str:
+    """
+    Normalize a company name for fuzzy dedup comparison.
+
+    Strips common suffixes like GmbH, Inc, Ltd, AG, etc.
+    """
+    if not company:
+        return ""
+
+    normalized = company.lower().strip()
+    normalized = re.sub(
+        r"\s*(gmbh|inc\.?|ltd\.?|llc|ag|se|co\.?|corp\.?|plc|s\.?a\.?|"
+        r"b\.?v\.?|n\.?v\.?|e\.?v\.?|kg|ohg|ug|sarl|srl|spa|pty)\s*\.?\s*$",
+        "", normalized, flags=re.IGNORECASE
+    )
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
 def _merge_jobs(existing: dict, new: dict) -> dict:
     """
     Merge two duplicate job dicts, keeping the most complete version.
@@ -126,7 +207,7 @@ def _merge_jobs(existing: dict, new: dict) -> dict:
     new_score = _data_completeness_score(new)
 
     # Prefer ATS-direct sources
-    ats_sources = {"google_dork", "greenhouse", "lever", "workday", "ashby", "personio", "smartrecruiters"}
+    ats_sources = {"ats_discovery", "google_dork", "greenhouse", "lever", "workday", "ashby", "personio", "smartrecruiters"}
     existing_is_ats = (existing.get("source") or "") in ats_sources or existing.get("ats_platform")
     new_is_ats = (new.get("source") or "") in ats_sources or new.get("ats_platform")
 

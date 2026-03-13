@@ -223,6 +223,25 @@ def run_search(
     all_jobs = normalize_jobs(all_jobs)
 
     # =========================================================================
+    # 2.5 Filter by date (removes stale ATS Discovery results)
+    # =========================================================================
+    if hours_old and hours_old < 8760:  # Only filter if less than 1 year
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(hours=hours_old)).strftime("%Y-%m-%d")
+        pre_date_count = len(all_jobs)
+        date_filtered = []
+        for j in all_jobs:
+            posted = j.get("date_posted")
+            if not posted:
+                date_filtered.append(j)
+            elif posted >= cutoff_date:
+                date_filtered.append(j)
+        removed_by_date = pre_date_count - len(date_filtered)
+        if removed_by_date > 0:
+            all_jobs = date_filtered
+            _progress(f"Date filter: removed {removed_by_date} jobs older than {hours_old}h (before {cutoff_date})")
+
+    # =========================================================================
     # 3. Detect languages
     # =========================================================================
     _progress("Detecting job languages...")

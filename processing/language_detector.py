@@ -67,6 +67,17 @@ GERMAN_REQUIRED_PATTERNS = [
     r"german\s+(b1|b2|c1|c2)[\s-]level",
     r"(b1|b2|c1|c2)[\s-]level\s+(in\s+)?german",
     r"german\s+language\s+(required|needed|skills|proficiency)",
+    # Additional German-text patterns
+    r"deutsch\s+als\s+arbeitssprache",
+    r"gute\s+deutschkenntnisse",
+    r"deutschkenntnisse\s+(auf\s+)?(c1|c2|b2|muttersprachniveau)",
+    r"sprache[n]?:\s*deutsch",
+    r"verhandlungssicher(es?)?\s+deutsch",
+    r"deutsch\s+verhandlungssicher",
+    r"kommunikation(sf[äa]higkeit)?\s+in\s+deutsch",
+    r"german\s+at\s+(a\s+)?(native|business|professional|fluent)\s+level",
+    r"(mindestens|minimum)\s+(b2|c1|c2)\s+(in\s+)?german",
+    r"(mindestens|minimum)\s+(b2|c1|c2)\s+(in\s+)?deutsch",
 ]
 
 # Patterns: GERMAN IS OPTIONAL (nice to have, not blocking)
@@ -74,11 +85,17 @@ GERMAN_OPTIONAL_PATTERNS = [
     r"german\s+(is\s+)?(a\s+)?(plus|bonus|advantage|beneficial|nice|preferred|helpful|asset|welcome|desirable)",
     r"(ideally|preferably|optionally).*german",
     r"german.*not\s+(required|mandatory|necessary|essential)",
-
     r"german\s+(helpful|advantageous)\s+but\s+not\s+(required|essential|mandatory)",
     r"deutsch(kenntnisse)?\s+(von\s+vorteil|w[üu]nschenswert|hilfreich|vorteilhaft|willkommen)",
     r"german\s+is\s+not\s+(required|a\s+must|necessary)",
     r"german\s+language\s+skills\s+are\s+(a\s+)?(plus|bonus|advantage)",
+    r"(basic|some|elementary)\s+german",
+    r"german\s+(a1|a2|b1)\b",
+    r"willingness\s+to\s+learn\s+german",
+    r"german\s+is\s+(nice|good)\s+to\s+have",
+    r"(bonus|plus)\s*:\s*german",
+    r"open\s+to\s+learning\s+german",
+    r"bereitschaft\s+deutsch\s+zu\s+lernen",
 ]
 
 # Patterns: ENGLISH IS THE WORKING LANGUAGE
@@ -90,11 +107,40 @@ ENGLISH_WORKING_PATTERNS = [
     r"no\s+german\s+(required|needed|necessary)",
     r"international\s+(team|environment|company).*english",
     r"without\s+(any\s+)?german",
+    r"englisch\s+(ist\s+)?(die\s+)?(arbeitssprache|unternehmenssprache)",
+    r"(fluent|proficient|excellent)\s+english\s+(is\s+)?(required|mandatory|essential)",
+    r"english\s+(c1|c2|native)\s+(required|level)",
+    r"communicate\s+(effectively\s+)?in\s+english",
+    r"english\s+only\s+(environment|team|workplace)",
+]
+
+# Patterns: FRENCH IS REQUIRED
+FRENCH_REQUIRED_PATTERNS = [
+    r"french\s+(is\s+)?(required|mandatory|essential|necessary|needed)",
+    r"(fluent|native|proficient|excellent)\s+(in\s+)?french",
+    r"(must|need\s+to)\s+(speak|know|have)\s+french",
+    r"french\s+(c1|c2|b2|native|fluent)",
+    r"french[\s-]speaking\s+(required|essential|mandatory)",
+    r"fran[çc]ais\s+(requis|obligatoire|indispensable|courant)",
+    r"ma[îi]trise\s+du\s+fran[çc]ais",
+    r"langue\s+de\s+travail.*fran[çc]ais",
+]
+
+# Patterns: DUTCH IS REQUIRED
+DUTCH_REQUIRED_PATTERNS = [
+    r"dutch\s+(is\s+)?(required|mandatory|essential|necessary|needed)",
+    r"(fluent|native|proficient|excellent)\s+(in\s+)?dutch",
+    r"(must|need\s+to)\s+(speak|know|have)\s+dutch",
+    r"dutch\s+(c1|c2|b2|native|fluent)",
+    r"dutch[\s-]speaking\s+(required|essential|mandatory)",
+    r"nederlands\s+(vereist|verplicht|noodzakelijk|vloeiend)",
+    r"vloeiend\s+nederlands",
 ]
 
 # Title patterns suggesting German-language job
 GERMAN_TITLE_PATTERNS = [
     r"\(m/w/d\)", r"\(w/m/d\)", r"\(m/w/x\)", r"\(w/m/x\)",
+    r"\(m/f/d\)", r"\(f/m/d\)", r"\(m/f/x\)",
     r"bundesweit", r"stellenangebot", r"sachbearbeiter",
     r"fachinformatiker", r"kaufmann", r"kauffrau",
     r"werkstudent", r"praktikant", r"auszubildende",
@@ -103,6 +149,14 @@ GERMAN_TITLE_PATTERNS = [
     r"german[\s-]native", r"muttersprachler",
     r"german\s+required", r"deutsch\s+erforderlich",
     r"deu?tschland",
+    r"projektleiter(in)?", r"produktmanager(in)?",
+    r"gesch[äa]ftsf[üu]hrer(in)?", r"berater(in)?",
+    r"entwickler(in)?", r"ingenieur(in)?",
+    r"mitarbeiter(in)?", r"leiter(in)?",
+    r"fachkraft", r"spezialist(in)?",
+    r"vollzeit", r"teilzeit",
+    r"festanstellung", r"befristet",
+    r"standort\s*:", r"ab\s+sofort",
 ]
 
 
@@ -167,17 +221,24 @@ def detect_language(text: Optional[str], title: str = "") -> str:
     if german_optional:
         return "English (German plus)"
 
+    # Check for French/Dutch required before falling back to text language
+    french_required = any(re.search(p, text_lower) for p in FRENCH_REQUIRED_PATTERNS)
+    if french_required:
+        return "French"
+
+    dutch_required = any(re.search(p, text_lower) for p in DUTCH_REQUIRED_PATTERNS)
+    if dutch_required:
+        return "Dutch"
+
     # No explicit language keywords — use text language
     if text_lang == "en":
         if title:
             title_lower = title.lower()
-            # Check title for German-required patterns (e.g., "German Speaker")
             title_requires_german = any(
                 re.search(p, title_lower) for p in GERMAN_REQUIRED_PATTERNS
             )
             if title_requires_german:
                 return "German"
-            # Check title for German-style patterns (e.g., "(m/w/d)")
             if any(re.search(p, title_lower) for p in GERMAN_TITLE_PATTERNS):
                 return "English (German plus)"
         return "English"
@@ -187,6 +248,10 @@ def detect_language(text: Optional[str], title: str = "") -> str:
         return "Spanish"
     elif text_lang == "nl":
         return "Dutch"
+    elif text_lang == "pt":
+        return "Portuguese"
+    elif text_lang == "it":
+        return "Italian"
 
     # Last resort
     return _detect_from_title(title) if title else "unknown"

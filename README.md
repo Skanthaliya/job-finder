@@ -18,11 +18,11 @@ A production-ready local tool that scrapes jobs from major job boards, queries 2
 - **Streamlit GUI** — web-based interface with real-time progress, charts, and interactive data table
 - **CLI interface** — full command-line support with argument parsing
 
-### Phase 2 (Planned)
-- Google Gemini AI integration
-- Job scoring against your resume profile
-- AI-generated cover letters
-- Resume bullet point tailoring
+### Phase 2 (Active)
+- **AI Job Scoring** — Gemini scores each job 1-100 against your CV (batch mode, progress bar)
+- **AI Cover Letters** — one-click tailored cover letter per job, auto-detects language
+- **CV Input** — paste all your CVs in the sidebar text box, or keep a `my_profile.txt` backup file
+- Resume bullet point tailoring (coming soon)
 
 ## Setup
 
@@ -44,9 +44,11 @@ source venv/bin/activate  # macOS/Linux
 # Install dependencies
 pip install -r requirements.txt
 
-# Set up API keys (optional but recommended)
+# Set up API keys
 cp .env.example .env
-# Edit .env and add your SERPAPI_KEY (free: 100 searches/month at serpapi.com)
+# Edit .env and add your keys:
+#   SERPAPI_KEY=...       (optional — free: 100 searches/month at serpapi.com)
+#   GEMINI_API_KEY=...    (for AI scoring + cover letters — free at aistudio.google.com/apikey)
 ```
 
 ## Usage
@@ -134,12 +136,15 @@ Edit `config.py` to customize:
 - **HTTP settings** — timeouts (30s), retries (2), User-Agent rotation
 - **Location settings** — European countries list, location scope options
 
-### Profile Setup (Phase 2)
+### AI Profile Setup
 
-Edit `my_profile.json` with your resume data to prepare for AI features:
-- Skills, experience, education
-- Preferred keywords and dealbreakers
-- Language proficiency
+To use AI scoring and cover letter generation, provide your CV text via one of these methods (in priority order):
+
+1. **Sidebar text box** — paste all your CV content directly in the Streamlit sidebar
+2. **`my_profile.txt`** — create this file in the project root with all your CVs copy-pasted
+3. **`my_profile.json`** — fill in the structured template (auto-flattened to text)
+
+You also need a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
 
 ## Project Structure
 
@@ -175,11 +180,13 @@ job-finder/
 ├── output/
 │   ├── excel_writer.py          # 3-sheet Excel with formatting and hyperlinks
 │   └── csv_writer.py            # CSV fallback output
-├── ai/                          # Phase 2 stubs (all raise NotImplementedError)
-│   ├── scorer.py                # Gemini job scoring (0-100)
-│   ├── cover_letter.py          # Gemini cover letter generation
-│   └── resume_tailor.py         # Gemini resume bullet tailoring
-├── my_profile.json              # User profile template (Phase 2)
+├── ai/                          # Phase 2 — AI scoring + cover letters (active)
+│   ├── profile_loader.py        # Loads CV text: sidebar → my_profile.txt → my_profile.json
+│   ├── scorer.py                # Gemini job scoring (1-100) with batch support
+│   ├── cover_letter.py          # Gemini cover letter generation (auto language)
+│   └── resume_tailor.py         # Gemini resume bullet tailoring (STUB)
+├── my_profile.json              # Structured profile template (JSON fallback)
+├── my_profile.txt               # Plain text CV backup (paste all CVs here)
 ├── .env.example                 # Template for API keys
 ├── requirements.txt
 ├── CONTEXT.md                   # Full project context & AI handoff doc
@@ -222,6 +229,7 @@ Every scraper returns data in the same format:
     "country": str | None,
     "date_posted": str | None,  # ISO "YYYY-MM-DD"
     "job_type": str | None,     # "fulltime", "parttime", "contract", "internship"
+    "experience_level": str | None, # "intern", "entry", "junior", "mid", "senior", "lead", etc.
     "is_remote": bool | None,
     "salary_min": float | None,
     "salary_max": float | None,
@@ -231,9 +239,9 @@ Every scraper returns data in the same format:
     "company_url": str | None,
     "description": str | None,
     "language": str | None,     # "English", "German", "English (German plus)", "unknown"
-    # Phase 2 AI fields
-    "ai_score": int | None,
-    "ai_reasoning": str | None,
+    # AI fields (populated by ai/scorer.py)
+    "ai_score": int | None,        # 1-100 relevance score
+    "ai_reasoning": str | None,    # Score reasoning + pros/cons
     "ai_cover_letter": str | None,
     "ai_resume_bullets": str | None,
 }

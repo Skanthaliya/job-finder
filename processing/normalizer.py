@@ -21,6 +21,7 @@ UNIFIED_SCHEMA_FIELDS = [
     "country",
     "date_posted",
     "job_type",
+    "experience_level",
     "is_remote",
     "salary_min",
     "salary_max",
@@ -128,6 +129,12 @@ def _normalize_single(job: dict) -> dict:
 
     # Normalize job_type to canonical lowercase
     clean["job_type"] = _normalize_job_type(clean["job_type"])
+
+    # Extract experience level from title if not already set
+    if not clean.get("experience_level"):
+        clean["experience_level"] = _extract_experience_level(
+            clean.get("title") or "", clean.get("description") or ""
+        )
 
     # Normalize is_remote to bool or None
     if clean["is_remote"] is not None:
@@ -248,3 +255,52 @@ def _normalize_job_type(job_type) -> str | None:
             return val
 
     return jt  # Return as-is if unrecognized
+
+
+def _extract_experience_level(title: str, description: str = "") -> str | None:
+    """
+    Extract experience level from job title and description.
+
+    Returns one of: "intern", "entry", "junior", "mid", "senior", "lead",
+    "principal", "staff", "director", "vp", "c-level", or None.
+    """
+    title_lower = title.lower()
+
+    level_patterns = [
+        (r"\b(c-level|cto|cfo|ceo|coo|cio|cpo)\b", "c-level"),
+        (r"\b(vp|vice\s+president)\b", "vp"),
+        (r"\b(director|direktor)\b", "director"),
+        (r"\b(principal|distinguished|fellow)\b", "principal"),
+        (r"\b(staff)\b", "staff"),
+        (r"\b(lead|head\s+of|team\s+lead|leiter)\b", "lead"),
+        (r"\b(senior|sr\.?|experienced)\b", "senior"),
+        (r"\b(junior|jr\.?)\b", "junior"),
+        (r"\b(entry[\s-]level|graduate|absolvent|berufseinsteiger|berufseinstieg)\b", "entry"),
+        (r"\b(intern|internship|praktik|werkstudent|working\s+student|trainee|auszubildende)\b", "intern"),
+    ]
+
+    for pattern, level in level_patterns:
+        if re.search(pattern, title_lower):
+            return level
+
+    desc_lower = description[:2000].lower() if description else ""
+    desc_patterns = [
+        (r"\b(\d+)\+?\s+years?\s+(of\s+)?experience", None),
+    ]
+
+    for pattern, _ in desc_patterns:
+        match = re.search(pattern, desc_lower)
+        if match:
+            years = int(match.group(1))
+            if years <= 1:
+                return "entry"
+            elif years <= 3:
+                return "junior"
+            elif years <= 6:
+                return "mid"
+            elif years <= 10:
+                return "senior"
+            else:
+                return "lead"
+
+    return None

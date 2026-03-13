@@ -157,11 +157,15 @@ LOG_FILE = "job_finder.log"
 LOG_LEVEL = "INFO"
 
 # =============================================================================
-# AI / Gemini (Phase 2)
+# AI / Gemini
 # =============================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 PROFILE_PATH = "my_profile.json"
+PROFILE_TXT_PATH = "my_profile.txt"
+COVER_LETTER_PROMPT_PATH = "cover_letter_prompt.txt"
+GEMINI_RATE_LIMIT_DELAY = 4.0  # seconds between API calls (safe for 15 RPM free tier)
+GEMINI_BATCH_SIZE = 5
 
 # =============================================================================
 # Country list for GUI dropdown

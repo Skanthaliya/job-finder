@@ -27,7 +27,8 @@ SOURCE_COLORS = {
     "google": "FFF3E0",       # Light orange
     "glassdoor": "F3E5F5",    # Light purple
     "zip_recruiter": "E0F7FA", # Light cyan
-    "google_dork": "FFF9C4",  # Light yellow
+    "ats_discovery": "FFF9C4", # Light yellow
+    "google_dork": "FFF9C4",  # Light yellow (legacy)
     "arbeitnow": "FCE4EC",    # Light pink
     "remotive": "E8EAF6",     # Light indigo
 }
@@ -35,8 +36,9 @@ SOURCE_COLORS = {
 # Summary columns (exclude long text fields)
 SUMMARY_COLUMNS = [
     "source", "ats_platform", "title", "company", "location", "country",
-    "date_posted", "job_type", "is_remote", "salary_min", "salary_max",
-    "salary_currency", "salary_interval", "job_url", "company_url", "language",
+    "date_posted", "job_type", "experience_level", "is_remote", "salary_min",
+    "salary_max", "salary_currency", "salary_interval", "job_url", "company_url",
+    "language",
 ]
 
 # AI columns for Sheet 3
@@ -88,6 +90,10 @@ def write_excel(jobs: list[dict], filename: str | None = None) -> str:
     df_summary = df_full[[c for c in SUMMARY_COLUMNS if c in df_full.columns]].copy()
     df_ai = df_full[[c for c in AI_COLUMNS if c in df_full.columns]].copy()
 
+    # Sort AI sheet by score descending when scores exist
+    if "ai_score" in df_ai.columns and df_ai["ai_score"].notna().any():
+        df_ai = df_ai.sort_values("ai_score", ascending=False, na_position="last")
+
     # Write to Excel with multiple sheets
     with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
         df_summary.to_excel(writer, sheet_name="Jobs Summary", index=False)
@@ -130,29 +136,54 @@ def _format_summary_sheet(ws, jobs: list[dict]) -> None:
     # Freeze top row
     ws.freeze_panes = "A2"
 
-    # Find the job_url column and source column indices
+    # Find column indices for formatting
     header_values = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
-    url_col_idx = None
-    source_col_idx = None
-
+    col_indices = {}
     for idx, val in enumerate(header_values):
-        if val == "job_url":
-            url_col_idx = idx + 1
-        if val == "source":
-            source_col_idx = idx + 1
+        if val:
+            col_indices[val] = idx + 1
+
+    url_col_idx = col_indices.get("job_url")
+    source_col_idx = col_indices.get("source")
+    lang_col_idx = col_indices.get("language")
+    remote_col_idx = col_indices.get("is_remote")
+    level_col_idx = col_indices.get("experience_level")
+
+    # Language color scheme
+    lang_colors = {
+        "English": "C8E6C9",              # Green
+        "English (German plus)": "DCEDC8", # Light lime
+        "German": "FFCDD2",               # Light red
+        "French": "D1C4E9",               # Light purple
+        "Dutch": "FFE0B2",                # Light orange
+        "unknown": "F5F5F5",              # Light gray
+    }
 
     # Apply row formatting
     for row_idx in range(2, ws.max_row + 1):
         # Color-code by source
         if source_col_idx:
             source_val = ws.cell(row=row_idx, column=source_col_idx).value or ""
-            # Check the first source (in case of combined sources)
             primary_source = source_val.split(" + ")[0].strip().lower() if source_val else ""
             color = SOURCE_COLORS.get(primary_source, "FFFFFF")
             row_fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
             for col_idx in range(1, ws.max_column + 1):
                 ws.cell(row=row_idx, column=col_idx).fill = row_fill
                 ws.cell(row=row_idx, column=col_idx).border = thin_border
+
+        # Color-code language column
+        if lang_col_idx:
+            lang_val = ws.cell(row=row_idx, column=lang_col_idx).value or ""
+            lang_color = lang_colors.get(str(lang_val), None)
+            if lang_color:
+                lang_fill = PatternFill(start_color=lang_color, end_color=lang_color, fill_type="solid")
+                ws.cell(row=row_idx, column=lang_col_idx).fill = lang_fill
+
+        # Bold "Remote" = True
+        if remote_col_idx:
+            remote_val = ws.cell(row=row_idx, column=remote_col_idx).value
+            if remote_val and str(remote_val).lower() in ("true", "yes", "1"):
+                ws.cell(row=row_idx, column=remote_col_idx).font = Font(bold=True, color="1B5E20")
 
         # Make job_url a hyperlink
         if url_col_idx:
@@ -161,7 +192,6 @@ def _format_summary_sheet(ws, jobs: list[dict]) -> None:
             if url_val and isinstance(url_val, str) and url_val.startswith("http"):
                 url_cell.hyperlink = url_val
                 url_cell.font = Font(color="0563C1", underline="single")
-                # Truncate display text if too long
                 if len(url_val) > 60:
                     url_cell.value = url_val[:57] + "..."
 
@@ -214,24 +244,83 @@ def _format_full_details_sheet(ws) -> None:
 
 
 def _format_ai_sheet(ws) -> None:
-    """Apply formatting to the AI Results placeholder sheet."""
+    """Apply formatting to the AI Results sheet with score color-coding."""
     header_fill = PatternFill(start_color="FF9800", end_color="FF9800", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
 
     for col_idx in range(1, ws.max_column + 1):
         cell = ws.cell(row=1, column=col_idx)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center")
+        cell.border = thin_border
 
     ws.freeze_panes = "A2"
 
-    # Add a note in cell A2 if the sheet only has headers
     if ws.max_row <= 1:
-        ws.cell(row=2, column=1).value = "AI scoring and generation will be available in Phase 2"
+        ws.cell(row=2, column=1).value = "No AI scores yet — run scoring from the Streamlit UI"
         ws.cell(row=2, column=1).font = Font(italic=True, color="808080")
+        return
 
-    # Auto-size
+    # Find ai_score column for color-coding
+    header_values = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    score_col_idx = None
+    for idx, val in enumerate(header_values):
+        if val == "ai_score":
+            score_col_idx = idx + 1
+            break
+
+    score_fills = {
+        "green": PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
+        "yellow": PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid"),
+        "red": PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid"),
+    }
+
+    for row_idx in range(2, ws.max_row + 1):
+        for col_idx in range(1, ws.max_column + 1):
+            ws.cell(row=row_idx, column=col_idx).border = thin_border
+
+        if score_col_idx:
+            score_val = ws.cell(row=row_idx, column=score_col_idx).value
+            try:
+                score_num = int(score_val) if score_val is not None else 0
+            except (ValueError, TypeError):
+                score_num = 0
+
+            if score_num >= 70:
+                fill = score_fills["green"]
+                font = Font(bold=True, color="006100")
+            elif score_num >= 40:
+                fill = score_fills["yellow"]
+                font = Font(bold=True, color="9C5700")
+            else:
+                fill = score_fills["red"]
+                font = Font(color="9C0006")
+
+            ws.cell(row=row_idx, column=score_col_idx).fill = fill
+            ws.cell(row=row_idx, column=score_col_idx).font = font
+
+    # Auto-size columns
     for col_idx in range(1, ws.max_column + 1):
         header = ws.cell(row=1, column=col_idx).value or ""
-        ws.column_dimensions[get_column_letter(col_idx)].width = max(len(str(header)) + 4, 15)
+        if header in ("ai_reasoning", "ai_cover_letter", "ai_resume_bullets"):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 50
+        else:
+            max_width = len(str(header)) + 4
+            for row_idx in range(2, min(ws.max_row + 1, 50)):
+                val = ws.cell(row=row_idx, column=col_idx).value
+                if val:
+                    max_width = max(max_width, min(len(str(val)), 40))
+            ws.column_dimensions[get_column_letter(col_idx)].width = max(max_width + 2, 15)
+
+    # Wrap text in long columns
+    for idx, val in enumerate(header_values):
+        if val in ("ai_reasoning", "ai_cover_letter", "ai_resume_bullets"):
+            for row_idx in range(2, ws.max_row + 1):
+                ws.cell(row=row_idx, column=idx + 1).alignment = Alignment(wrap_text=True, vertical="top")

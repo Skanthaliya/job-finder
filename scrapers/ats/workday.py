@@ -223,7 +223,7 @@ class WorkdayScraper(BaseATSScraper):
             return None
 
         job = self._empty_job()
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "workday"
         job["title"] = posting.get("title")
         job["company"] = company.replace("-", " ").title()
@@ -270,7 +270,7 @@ class WorkdayScraper(BaseATSScraper):
             return None
 
         job = self._empty_job()
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "workday"
         job["title"] = data.get("title") or data.get("jobPostingTitle")
         job["company"] = data.get("company") or company.replace("-", " ").title()
@@ -306,7 +306,7 @@ class WorkdayScraper(BaseATSScraper):
     def _fallback_from_url(self, url: str) -> dict | None:
         """Create a minimal job entry from the URL when API scraping fails."""
         job = self._empty_job()
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = "workday"
         job["job_url"] = url
 

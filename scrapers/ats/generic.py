@@ -86,7 +86,7 @@ class GenericScraper(BaseATSScraper):
             soup = BeautifulSoup(html_text, "lxml")
 
             job = self._empty_job()
-            job["source"] = "google_dork"
+            job["source"] = "ats_discovery"
             job["ats_platform"] = None
             job["job_url"] = url
 
@@ -251,7 +251,7 @@ class GenericScraper(BaseATSScraper):
     def _fallback_from_url(self, url: str) -> dict | None:
         """Create a minimal job entry from just the URL."""
         job = self._empty_job()
-        job["source"] = "google_dork"
+        job["source"] = "ats_discovery"
         job["ats_platform"] = None
         job["job_url"] = url
 
