@@ -3,10 +3,32 @@
 ## Repository
 - **Repo:** https://github.com/Skanthaliya/job-finder
 - **Branch:** `main`
-- **Latest commit:** `b0ded1d` (2026-03-11) — "Improve German language detection patterns"
+- **Latest commit:** `2fd3e63` (2026-03-13) — "context handoff"
 - **Language:** Python 3.12+
 - **GUI:** Streamlit
 - **Status:** Phase 1 COMPLETE ✅ — Core job search working. Phase 2 (AI) NOT started.
+
+---
+
+## Quick Start
+
+```bash
+cd job-finder
+python3.12 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # Then fill in your SERPAPI_KEY
+
+# Quick test (small search, fast)
+python3 main.py --search "Product Owner" --scope country --country Germany --results 5 --no-ats
+
+# Full search (all sources)
+python3 main.py --scope country --country Germany
+
+# GUI
+streamlit run app.py
+```
+
+Typical runtime: 30-90 seconds depending on sources enabled. ATS Discovery adds ~60s (250+ API calls). A minimal `--no-ats` search completes in ~15s.
 
 ---
 
@@ -34,7 +56,9 @@ job-finder/
 ├── app.py                             # Streamlit GUI
 ├── my_profile.json                    # User resume template (for AI Phase 2)
 ├── requirements.txt                   # python-jobspy, streamlit, langdetect, etc.
+├── .env.example                       # Template for required env vars (SERPAPI_KEY, GEMINI_API_KEY)
 ├── .gitignore                         # venv, output, .env, registry files
+├── README.md                          # User-facing documentation
 ├── CONTEXT.md                         # ← This file — project context & handoff
 ├── scrapers/
 │   ├── jobspy_scraper.py              # python-jobspy wrapper (Indeed, LinkedIn, etc.)
@@ -72,6 +96,8 @@ job-finder/
 ---
 
 ## Phase 1 — COMPLETE — What Works
+
+> **Note on phase numbering:** Git commit messages reference "phase 2" and "phase 3" for scraper feature additions (ATS discovery, company registry, etc.). In this document, "Phase 1" means ALL scraping/processing work (complete), and "Phase 2" means AI features (not started). The git history phases and this document's phases are different numbering schemes.
 
 ### Data Sources (all working)
 
@@ -230,7 +256,7 @@ LANGUAGE_FILTER_OPTIONS = ["All", "English", "English (German plus)", "German", 
 - User-Agent rotation: 3 browser agents
 
 ### ATS Platform Detection Patterns (config.py)
-The system auto-detects ATS platforms from job URLs using regex patterns for: Workday, Greenhouse, Lever, Personio, Ashby, SmartRecruiters, BambooHR, Recruitee, JazzHR, iCIMS, and SAP SuccessFactors.
+The system auto-detects ATS platforms from job URLs using regex patterns for: Workday, Greenhouse, Lever, Personio, Ashby, SmartRecruiters, iCIMS, and Taleo.
 
 ### SerpAPI Dorking
 - 3-tier dork templates: Major ATS, More ATS, Wild discovery
@@ -258,9 +284,23 @@ The system auto-detects ATS platforms from job URLs using regex patterns for: Wo
 
 8. **No FlowCV API** — FlowCV has no API. Plan for AI phase: generate `.docx` resume files directly using `python-docx`, which user can upload to FlowCV or use as-is.
 
-9. **Parallel execution** — 4-worker ThreadPoolExecutor runs scrapers concurrently. Each scraper has safe wrapper functions for error isolation.
+9. **Parallel execution with error isolation** — 4-worker ThreadPoolExecutor runs scrapers concurrently. Each scraper runs inside a `_run_*_safe()` wrapper that catches all exceptions, so one failing scraper never crashes the pipeline. Each future has a 5-minute timeout (`future.result(timeout=300)`).
 
 10. **Progressive language detection** — Detection order: explicit "no German" override → German optional patterns → German required patterns → English working language patterns → langdetect text language → title patterns. This prevents false positives.
+
+---
+
+## What NOT to Change (Fragile Areas)
+
+1. **JobSpy per-site-per-term pattern** — JobSpy only accepts one search term at a time. The nested `for site in sites: for term in search_terms:` loop in `main.py` is intentional. Do not try to batch terms.
+
+2. **Language detection order** in `language_detector.py` — The cascade (explicit "no German" → German optional → German required → English working language → langdetect → title patterns) prevents false positives. Reordering will break classification accuracy.
+
+3. **Workday URL format** — Workday URLs follow `{tenant}.wd{N}.myworkdayjobs.com/en-US/{path}` exactly. The `wd{N}` number is tenant-specific and cannot be guessed. Wrong numbers = 404.
+
+4. **Safe wrapper pattern** — Every scraper runs inside a `_run_*_safe()` wrapper in `main.py` that catches all exceptions. This prevents one failing scraper from crashing the entire pipeline. Each scraper has a 5-minute timeout (`future.result(timeout=300)`).
+
+5. **Location filter logic** — The remote job filter in `main.py` (step 4.5) has carefully ordered checks: blocked countries first, then global remote keywords, then allowed countries, then benefit-of-doubt fallback. Reordering changes which jobs are kept.
 
 ---
 
@@ -275,7 +315,6 @@ The system auto-detects ATS platforms from job URLs using regex patterns for: Wo
 | **SerpAPI quota not visible in CLI** | Low | GUI shows usage, CLI doesn't |
 | **No job age filter for ATS Discovery** | Medium | ATS APIs don't support date filtering. Old jobs appear. Needs post-processing date filter |
 | **Company list GitHub URLs may 404** | Low | `company_list_updater.py` tries specific GitHub URLs that may not exist. Fails silently |
-| **No `.env.example` file** | Low | Users don't know which env vars to set |
 
 ---
 
@@ -304,14 +343,88 @@ streamlit run app.py
 |------|---------|-------------|
 | `--search` | config defaults | Space-separated search terms |
 | `--location` | "" | City name (empty = whole country) |
-| `--scope` | "country" | city / country / europe |
+| `--scope` | "city" | city / country / europe |
 | `--country` | "Germany" | Target country |
 | `--hours` | 168 | Max job age in hours |
 | `--results` | 50 | Results per site per term |
 | `--type` | None | fulltime / parttime / contract / internship |
 | `--remote` | False | Remote-only flag |
 | `--language` | "All" | Language filter |
+| `--no-jobspy` | False | Disable JobSpy scraper |
+| `--no-ats` | False | Disable ATS Discovery engine |
+| `--no-arbeitnow` | False | Disable Arbeitnow API |
+| `--remotive` | False | Enable Remotive API (off by default) |
+| `--serpapi` | False | Enable SerpAPI dorking (off by default) |
 | `--format` | "excel" | Output format: excel / csv |
+| `--sites` | indeed linkedin google | JobSpy sites to use |
+
+---
+
+## Testing / Validation
+
+To verify the tool works after changes:
+
+```bash
+# 1. Quick smoke test (no ATS, no SerpAPI — fastest)
+python3 main.py --search "Product Owner" --scope country --country Germany --results 5 --no-ats
+
+# 2. Check the log file for errors
+cat job_finder.log | grep -i "error\|failed\|exception"
+
+# 3. Verify output was created
+ls -la output/jobs_*.xlsx
+
+# 4. Full test with ATS Discovery
+python3 main.py --search "Product Owner" --scope country --country Germany --results 10
+```
+
+**Expected behavior:**
+- JobSpy should return 10-50+ jobs per site/term combination
+- Arbeitnow should return 20-100+ jobs (Germany-focused)
+- ATS Discovery should return 50-200+ jobs across Greenhouse/Ashby/SmartRecruiters (Lever/Workday may return 0 due to known URL issues)
+- Deduplication typically removes 10-30% of raw results
+- Output Excel has 3 sheets: Summary, Full Data, AI Results (placeholder)
+
+**Common failure modes:**
+- `JobSpy: google/... failed: 429` — Google rate-limiting, expected and harmless
+- `Workday X: 0 jobs` — Known issue, URL may be wrong
+- `Lever X: 404` — Known issue, slug may be wrong
+
+---
+
+## File-by-File Reference
+
+| File | Purpose | Active? |
+|------|---------|---------|
+| `config.py` | All constants, defaults, ATS patterns, HTTP settings | Yes |
+| `main.py` | CLI entry point + `run_search()` orchestrator | Yes |
+| `app.py` | Streamlit web GUI | Yes |
+| `my_profile.json` | User resume template for AI Phase 2 | Placeholder |
+| `scrapers/jobspy_scraper.py` | python-jobspy wrapper, `_map_jobspy_row()` helper | Yes |
+| `scrapers/ats_discovery.py` | Direct ATS API calls for 250+ companies | Yes |
+| `scrapers/serpapi_dorker.py` | SerpAPI Google dorking with quota tracking | Yes |
+| `scrapers/url_router.py` | Classifies URLs by ATS pattern, dispatches to scrapers | Yes |
+| `scrapers/company_registry.py` | Auto-growing JSON company list on disk | Yes |
+| `scrapers/company_list_updater.py` | Downloads company lists from GitHub repos | Yes |
+| `scrapers/google_dorker.py` | Legacy Google dorking — DEAD CODE, never called | No |
+| `scrapers/apis/arbeitnow.py` | Arbeitnow.com REST API scraper | Yes |
+| `scrapers/apis/remotive.py` | Remotive.com REST API scraper | Yes |
+| `scrapers/ats/base.py` | Abstract base class (retry, User-Agent rotation) | Yes |
+| `scrapers/ats/greenhouse.py` | Greenhouse boards API scraper | Yes |
+| `scrapers/ats/lever.py` | Lever postings API scraper | Yes |
+| `scrapers/ats/workday.py` | Workday internal JSON API scraper | Yes |
+| `scrapers/ats/personio.py` | Personio XML feed + HTML fallback scraper | Yes |
+| `scrapers/ats/ashby.py` | Ashby posting API scraper | Yes |
+| `scrapers/ats/smartrecruiters.py` | SmartRecruiters public API scraper | Yes |
+| `scrapers/ats/generic.py` | BeautifulSoup fallback for unknown career pages | Yes |
+| `processing/normalizer.py` | Maps all jobs to unified schema, normalizes dates | Yes |
+| `processing/language_detector.py` | 46+ regex patterns for language requirement detection | Yes |
+| `processing/deduplicator.py` | URL + title/company deduplication, source merging | Yes |
+| `output/excel_writer.py` | 3-sheet Excel with formatting, hyperlinks, auto-width | Yes |
+| `output/csv_writer.py` | CSV fallback output | Yes |
+| `ai/scorer.py` | Gemini job scoring — STUB (NotImplementedError) | No |
+| `ai/cover_letter.py` | Gemini cover letter generation — STUB | No |
+| `ai/resume_tailor.py` | Gemini resume bullet tailoring — STUB | No |
 
 ---
 
@@ -327,6 +440,7 @@ streamlit run app.py
 | Mar 11 | `dc59556` | Workday ATS, smart language detection, 12 default roles, .env support |
 | Mar 11 | `08cff3b` | Fix location filter, SerpAPI scope, broken SmartRecruiters URLs, date parsing, remote filter |
 | Mar 11 | `b0ded1d` | Improve German language detection patterns (German Speaker, native-level German, etc.) |
+| Mar 13 | `2fd3e63` | Context handoff — added CONTEXT.md, .env.example |
 
 ---
 
@@ -357,7 +471,6 @@ streamlit run app.py
 
 ### Priority 5: Enhancements
 - Delete dead `google_dorker.py`
-- Add `.env.example` file
 - Add date filter for ATS Discovery results (post-processing)
 - Add more Greenhouse/Ashby companies (these platforms have correct slugs)
 - Consider adding StepStone.de, BerlinStartupJobs, EnglishJobs.de scrapers

@@ -1,17 +1,18 @@
 # Job Finder — Personal Job Search Aggregator
 
-A production-ready local tool that scrapes jobs from major job boards, discovers hidden jobs from company career pages via Google dorking, detects job language (English/German), and outputs results to Excel. Features a Streamlit web GUI.
+A production-ready local tool that scrapes jobs from major job boards, queries 250+ company ATS portals directly, discovers hidden jobs via SerpAPI dorking, detects job language requirements (English/German), and outputs results to Excel. Features a Streamlit web GUI.
 
 ## Features
 
 ### Phase 1 (Current)
 - **Multi-source job scraping**
   - Job boards via [python-jobspy](https://github.com/Bunsly/JobSpy): Indeed, LinkedIn, Google Jobs, Glassdoor, ZipRecruiter
-  - Google Dorking: discovers jobs directly on company career pages
-  - ATS API scrapers: Greenhouse, Lever, Workday, Personio, Ashby, SmartRecruiters
-  - Public APIs: Arbeitnow, Remotive
-  - Generic HTML scraper for unknown career pages
-- **Language detection** — automatically classifies jobs as English, German, etc.
+  - ATS Discovery: queries 250+ companies directly via Greenhouse, Lever, Workday, Personio, Ashby, SmartRecruiters APIs
+  - SerpAPI Dorking: discovers hidden jobs via Google search API with quota tracking (100/month free tier)
+  - Public APIs: Arbeitnow (Germany-focused), Remotive (remote jobs)
+  - Auto-growing company registry: new companies discovered from results are saved for future searches
+  - Generic HTML scraper fallback for unknown career pages
+- **Smart language detection** — 46+ regex patterns detect language REQUIREMENTS (not just text language): English, German, "English (German plus)"
 - **Smart deduplication** — merges duplicate listings, keeps the most complete version
 - **Formatted Excel output** — multi-sheet workbook with hyperlinks, color coding, auto-sizing
 - **Streamlit GUI** — web-based interface with real-time progress, charts, and interactive data table
@@ -26,7 +27,7 @@ A production-ready local tool that scrapes jobs from major job boards, discovers
 ## Setup
 
 ### Prerequisites
-- Python 3.11+ (uses `X | None` type syntax)
+- Python 3.12+ (uses `X | None` type syntax)
 - pip
 
 ### Installation
@@ -42,6 +43,10 @@ source venv/bin/activate  # macOS/Linux
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Set up API keys (optional but recommended)
+cp .env.example .env
+# Edit .env and add your SERPAPI_KEY (free: 100 searches/month at serpapi.com)
 ```
 
 ## Usage
@@ -64,23 +69,29 @@ This opens a web app at http://localhost:8501 with:
 ### Command Line
 
 ```bash
-# Basic search
-python main.py
+# Basic search (uses 12 default roles, searches all of Germany)
+python main.py --scope country
 
 # Custom search
 python main.py --search "Data Engineer" --location "Munich" --country "Germany"
 
+# Country-wide search with specific roles
+python main.py --search "Product Owner" "Scrum Master" --scope country --country Germany
+
+# Europe-wide search
+python main.py --search "Product Manager" --scope europe
+
 # Remote jobs only
-python main.py --search "Python Developer" --location "Berlin" --remote
+python main.py --search "Python Developer" --remote
 
 # Filter by language
-python main.py --search "Software Engineer" --location "Berlin" --language English
+python main.py --search "Software Engineer" --scope country --language English
 
-# Disable specific sources
-python main.py --no-dork --no-arbeitnow
+# Disable specific sources (faster search)
+python main.py --no-ats --no-arbeitnow
 
-# Enable Remotive (disabled by default)
-python main.py --remotive
+# Enable optional sources
+python main.py --remotive --serpapi
 
 # CSV output
 python main.py --format csv
@@ -96,30 +107,32 @@ python main.py --help
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--search`, `-s` | "Software Engineer" | Job title or keywords |
-| `--location`, `-l` | "Berlin" | City or region |
+| `--search`, `-s` | 12 default roles | Job titles to search (multiple allowed) |
+| `--location`, `-l` | "" (whole country) | City or region |
+| `--scope` | "city" | Location scope: city / country / europe |
 | `--country`, `-c` | "Germany" | Country |
 | `--hours` | 168 (7 days) | Max job age in hours |
-| `--results` | 50 | Results per site |
+| `--results` | 50 | Results per site per term |
 | `--type` | None | fulltime, parttime, contract, internship |
 | `--remote` | False | Remote jobs only |
 | `--language` | None | English, German, French, Spanish |
-| `--no-jobspy` | False | Disable JobSpy |
-| `--no-dork` | False | Disable Google Dorking |
-| `--no-arbeitnow` | False | Disable Arbeitnow |
-| `--remotive` | False | Enable Remotive |
+| `--no-jobspy` | False | Disable JobSpy scraper |
+| `--no-ats` | False | Disable ATS Discovery engine |
+| `--no-arbeitnow` | False | Disable Arbeitnow API |
+| `--remotive` | False | Enable Remotive API |
+| `--serpapi` | False | Enable SerpAPI dorking |
 | `--format` | excel | excel or csv |
-| `--sites` | indeed linkedin google | JobSpy sites |
+| `--sites` | indeed linkedin google | JobSpy sites to use |
 
 ## Configuration
 
 Edit `config.py` to customize:
 
-- **Search defaults** — default keywords, location, country
-- **Dork templates** — Google dork query patterns
-- **ATS patterns** — URL regex for identifying ATS platforms
-- **HTTP settings** — timeouts, retries, User-Agent rotation
-- **Rate limiting** — delays between Google dork queries
+- **Search defaults** — default keywords (12 roles), location, country
+- **ATS patterns** — URL regex for identifying ATS platforms from job URLs
+- **SerpAPI dork templates** — Google dork query patterns for SerpAPI
+- **HTTP settings** — timeouts (30s), retries (2), User-Agent rotation
+- **Location settings** — European countries list, location scope options
 
 ### Profile Setup (Phase 2)
 
@@ -133,37 +146,43 @@ Edit `my_profile.json` with your resume data to prepare for AI features:
 ```
 job-finder/
 ├── config.py                    # All configuration and constants
+├── main.py                      # CLI entry point + run_search() orchestrator
+├── app.py                       # Streamlit web GUI
 ├── scrapers/
-│   ├── jobspy_scraper.py        # python-jobspy wrapper
-│   ├── google_dorker.py         # Google dork query engine
+│   ├── jobspy_scraper.py        # python-jobspy wrapper (Indeed, LinkedIn, etc.)
+│   ├── ats_discovery.py         # Direct ATS API calls for 250+ companies
+│   ├── serpapi_dorker.py        # SerpAPI Google dorking with quota tracking
 │   ├── url_router.py            # URL classifier → ATS scraper dispatcher
+│   ├── company_registry.py      # Auto-growing company list (JSON on disk)
+│   ├── company_list_updater.py  # Downloads company lists from GitHub repos
+│   ├── google_dorker.py         # LEGACY — not used (replaced by SerpAPI)
 │   ├── ats/
-│   │   ├── base.py              # Abstract base class for ATS scrapers
+│   │   ├── base.py              # Abstract base class (retry, User-Agent rotation)
 │   │   ├── greenhouse.py        # Greenhouse boards API
 │   │   ├── lever.py             # Lever postings API
-│   │   ├── workday.py           # Workday internal API
-│   │   ├── personio.py          # Personio XML/HTML scraper
-│   │   ├── ashby.py             # Ashby jobs API
-│   │   ├── smartrecruiters.py   # SmartRecruiters API
-│   │   └── generic.py           # Generic HTML fallback
+│   │   ├── workday.py           # Workday internal JSON API
+│   │   ├── personio.py          # Personio XML feed + HTML fallback
+│   │   ├── ashby.py             # Ashby posting API
+│   │   ├── smartrecruiters.py   # SmartRecruiters public API
+│   │   └── generic.py           # BeautifulSoup fallback for unknown sites
 │   └── apis/
-│       ├── arbeitnow.py         # Arbeitnow.com API
-│       └── remotive.py          # Remotive.com API
+│       ├── arbeitnow.py         # Arbeitnow.com API (Germany-focused)
+│       └── remotive.py          # Remotive.com API (remote jobs)
 ├── processing/
-│   ├── normalizer.py            # Normalize to unified schema
-│   ├── language_detector.py     # langdetect wrapper
-│   └── deduplicator.py          # Smart deduplication
+│   ├── normalizer.py            # Unified schema normalization, date parsing
+│   ├── language_detector.py     # 46+ regex patterns for language requirement detection
+│   └── deduplicator.py          # URL + title/company dedup, source merging
 ├── output/
-│   ├── excel_writer.py          # Formatted .xlsx output
-│   └── csv_writer.py            # CSV fallback
-├── ai/                          # Phase 2 stubs
-│   ├── scorer.py                # Gemini job scoring
-│   ├── cover_letter.py          # Gemini cover letter gen
-│   └── resume_tailor.py         # Gemini resume tailoring
-├── app.py                       # Streamlit GUI
-├── main.py                      # CLI entry point + orchestrator
-├── my_profile.json              # User profile template
+│   ├── excel_writer.py          # 3-sheet Excel with formatting and hyperlinks
+│   └── csv_writer.py            # CSV fallback output
+├── ai/                          # Phase 2 stubs (all raise NotImplementedError)
+│   ├── scorer.py                # Gemini job scoring (0-100)
+│   ├── cover_letter.py          # Gemini cover letter generation
+│   └── resume_tailor.py         # Gemini resume bullet tailoring
+├── my_profile.json              # User profile template (Phase 2)
+├── .env.example                 # Template for API keys
 ├── requirements.txt
+├── CONTEXT.md                   # Full project context & AI handoff doc
 └── README.md
 ```
 
@@ -172,18 +191,21 @@ job-finder/
 ### Data Flow
 
 ```
-1. User configures search → app.py or main.py
-2. Orchestrator runs scrapers in parallel:
-   ├── JobSpy → Indeed, LinkedIn, Google Jobs...
-   ├── Google Dorker → discovers URLs → URL Router → ATS Scrapers
-   ├── Arbeitnow API
-   └── Remotive API
-3. All results merged → unified schema
-4. Normalizer → standardize fields
-5. Language Detector → classify each job
-6. Language Filter → (if set)
-7. Deduplicator → merge duplicates
-8. Output → Excel / CSV
+1. User configures search → app.py (GUI) or main.py (CLI)
+2. Orchestrator runs scrapers in parallel (4-worker ThreadPoolExecutor):
+   ├── JobSpy → Indeed, LinkedIn, Google Jobs (per site, per term)
+   ├── ATS Discovery → Greenhouse, Lever, Ashby, SmartRecruiters, Personio, Workday (250+ companies)
+   ├── Arbeitnow API (Germany-focused)
+   ├── Remotive API (remote jobs, optional)
+   └── SerpAPI Dorking (optional) → URL Router → ATS Scrapers
+3. Normalize all results → unified schema
+4. Detect language requirements (46+ regex patterns)
+5. Apply language filter (if set)
+6. Apply location filter (blocks US-only remote, keeps EU/India remote)
+7. Deduplicate (URL + title/company matching)
+8. Auto-learn new companies from job URLs → save to registry
+9. Sort by date descending
+10. Output → Excel / CSV
 ```
 
 ### Unified Job Schema
@@ -192,7 +214,7 @@ Every scraper returns data in the same format:
 
 ```python
 {
-    "source": str,              # "indeed", "linkedin", "google_dork", "arbeitnow"
+    "source": str,              # "indeed", "linkedin", "ats_discovery", "arbeitnow", "remotive", "google_dork"
     "ats_platform": str | None, # "workday", "greenhouse", "lever", etc.
     "title": str,
     "company": str,
@@ -208,7 +230,7 @@ Every scraper returns data in the same format:
     "job_url": str,
     "company_url": str | None,
     "description": str | None,
-    "language": str | None,     # "English", "German", "unknown"
+    "language": str | None,     # "English", "German", "English (German plus)", "unknown"
     # Phase 2 AI fields
     "ai_score": int | None,
     "ai_reasoning": str | None,
@@ -219,11 +241,14 @@ Every scraper returns data in the same format:
 
 ## Known Limitations
 
-- **Rate Limiting**: Google dorking may get rate-limited (HTTP 429). The tool waits 30s and skips. Space out searches.
+- **SerpAPI quota**: Free tier allows 100 searches/month. Quota is tracked in `serpapi_usage.json`. Use `--serpapi` flag to enable (off by default to conserve quota).
+- **Workday URLs**: Many configured Workday URLs return 404. The tenant URL format (`{tenant}.wd{N}.myworkdayjobs.com`) is fragile and company-specific.
+- **Lever slugs**: ~90% of configured Lever company slugs return 404. Companies may have changed ATS or slugs.
+- **Google Jobs via JobSpy**: Google frequently returns HTTP 429 (rate limit). Not critical since other sources provide good coverage.
 - **LinkedIn Scraping**: LinkedIn aggressively blocks scrapers. Results may be limited.
-- **Workday**: The most complex ATS to scrape. Some companies have non-standard configurations that the scraper can't handle — it falls back to returning the URL with minimal info.
+- **No date filter for ATS Discovery**: ATS APIs don't support date filtering natively. Old job postings may appear in results.
 - **JavaScript-rendered Pages**: The generic scraper only works with server-rendered HTML. JS-heavy career pages (React/Angular SPAs) may return minimal data.
-- **Accuracy**: Language detection requires sufficient text. Short descriptions may be classified as "unknown".
+- **Language detection accuracy**: Requires sufficient description text. Short descriptions may be classified as "unknown".
 - **Terms of Service**: Web scraping may violate the ToS of some sites. Use responsibly and for personal use only.
 
 ## Troubleshooting
@@ -233,24 +258,26 @@ Every scraper returns data in the same format:
 pip install python-jobspy
 ```
 
-### "googlesearch-python not installed"
-```bash
-pip install googlesearch-python
-```
+### SerpAPI not working
+- Ensure you have a valid API key: sign up at [serpapi.com](https://serpapi.com)
+- Copy `.env.example` to `.env` and add your key: `SERPAPI_KEY=your_key_here`
+- Check quota: free tier is 100 searches/month (tracked in `serpapi_usage.json`)
+- SerpAPI is off by default — enable with `--serpapi` flag
 
-### Rate limited by Google
-- Increase `GOOGLE_DORK_DELAY_MIN` and `GOOGLE_DORK_DELAY_MAX` in `config.py`
-- Reduce the number of dork templates
-- Disable Google dorking with `--no-dork` and use only job board scrapers
+### No results from ATS Discovery
+- ATS Discovery queries 250+ companies. If returning 0 results, check `job_finder.log` for errors.
+- Many Workday/Lever URLs are known to 404 — this is expected. Greenhouse, Ashby, and SmartRecruiters are the most reliable.
+- Try disabling ATS Discovery with `--no-ats` to isolate the issue.
+
+### No results from JobSpy
+- Some sites may be temporarily blocking requests
+- Google Jobs frequently returns 429 — this is normal
+- Try different combinations of sites: `--sites indeed linkedin`
+- Broaden search terms or increase `--hours`
 
 ### Excel file won't open
 - Ensure `openpyxl` is installed: `pip install openpyxl`
 - Check the `output/` directory for the generated file
-
-### No results from JobSpy
-- Some sites may be temporarily blocking requests
-- Try different combinations of sites: `--sites indeed google`
-- Broaden search terms or increase `--hours`
 
 ### Streamlit won't start
 ```bash
@@ -260,6 +287,11 @@ streamlit run app.py --server.port 8501
 
 ### Encoding issues with German characters
 - The tool uses UTF-8 throughout. If Excel shows garbled text, try opening with "UTF-8" encoding explicitly.
+
+### Check logs for detailed errors
+```bash
+cat job_finder.log | grep -i "error\|failed"
+```
 
 ## License
 

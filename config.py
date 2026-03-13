@@ -160,7 +160,7 @@ LOG_LEVEL = "INFO"
 # AI / Gemini (Phase 2)
 # =============================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-pro"
+GEMINI_MODEL = "gemini-2.0-flash"
 PROFILE_PATH = "my_profile.json"
 
 # =============================================================================
