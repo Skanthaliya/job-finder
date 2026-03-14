@@ -108,7 +108,7 @@ def _search_instahyre(
                 logger.debug("Instahyre page %d returned %d", page, resp.status_code)
                 break
 
-            page_jobs = _parse_instahyre_html(resp.text)
+            page_jobs = _parse_instahyre_html(resp.text, search_term)
             if not page_jobs:
                 break
 
@@ -122,9 +122,14 @@ def _search_instahyre(
     return jobs
 
 
-def _parse_instahyre_html(html: str) -> list[dict]:
-    """Parse Instahyre search results HTML into job dicts."""
+def _parse_instahyre_html(html: str, search_term: str = "") -> list[dict]:
+    """Parse Instahyre search results HTML into job dicts.
+
+    Filters results to only include jobs whose title or description
+    contains at least one word from the search term.
+    """
     jobs: list[dict] = []
+    search_words = [w.lower() for w in search_term.split()] if search_term else []
 
     try:
         soup = BeautifulSoup(html, "lxml")
@@ -162,6 +167,11 @@ def _parse_instahyre_html(html: str) -> list[dict]:
 
                 if not title or not url:
                     continue
+
+                if search_words:
+                    text_blob = f"{title} {description}".lower()
+                    if not any(w in text_blob for w in search_words):
+                        continue
 
                 is_remote = False
                 if loc and "remote" in loc.lower():

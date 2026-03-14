@@ -11,9 +11,9 @@ No authentication required.
 import logging
 import re
 from datetime import datetime, timedelta
-from html import unescape
 
 from scrapers.ats.base import BaseATSScraper
+from scrapers.ats.utils import strip_html as _strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,6 @@ class SmartRecruitersScraper(BaseATSScraper):
         elif isinstance(loc, str):
             job["location"] = loc
 
-        # Check for remote
         remote_status = loc.get("remote", False) if isinstance(loc, dict) else False
         if remote_status:
             job["is_remote"] = True
@@ -232,18 +231,6 @@ class SmartRecruitersScraper(BaseATSScraper):
 
         job["company_url"] = f"https://jobs.smartrecruiters.com/{company_slug}"
         return job
-
-
-def _strip_html(html_text: str) -> str:
-    """Strip HTML tags from text."""
-    text = re.sub(r"<br\s*/?>", "\n", html_text)
-    text = re.sub(r"<p>", "\n", text)
-    text = re.sub(r"</p>", "\n", text)
-    text = re.sub(r"<li>", "\n• ", text)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
 
 
 # Module-level instance

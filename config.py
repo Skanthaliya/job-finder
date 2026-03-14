@@ -108,15 +108,19 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 # =============================================================================
 JOBSPY_SITES = ["indeed", "linkedin", "google", "glassdoor", "zip_recruiter", "naukri", "bayt"]
 
+# Sites that are known to be unreliable (403s, Cloudflare blocks, 0 results).
+# They still work occasionally, so they remain selectable in the UI.
+JOBSPY_UNRELIABLE_SITES = {"google", "glassdoor", "zip_recruiter"}
+
 # Country-specific site recommendations (auto-enabled when country matches)
 COUNTRY_JOBSPY_SITES = {
-    "India": ["indeed", "linkedin", "google", "glassdoor", "naukri"],
-    "UAE": ["indeed", "linkedin", "google", "bayt"],
-    "Saudi Arabia": ["indeed", "linkedin", "google", "bayt"],
-    "Qatar": ["indeed", "linkedin", "google", "bayt"],
-    "Bahrain": ["indeed", "linkedin", "google", "bayt"],
-    "Kuwait": ["indeed", "linkedin", "google", "bayt"],
-    "Oman": ["indeed", "linkedin", "google", "bayt"],
+    "India": ["indeed", "linkedin", "naukri"],
+    "UAE": ["indeed", "linkedin", "bayt"],
+    "Saudi Arabia": ["indeed", "linkedin", "bayt"],
+    "Qatar": ["indeed", "linkedin", "bayt"],
+    "Bahrain": ["indeed", "linkedin", "bayt"],
+    "Kuwait": ["indeed", "linkedin", "bayt"],
+    "Oman": ["indeed", "linkedin", "bayt"],
 }
 
 # =============================================================================

@@ -60,6 +60,70 @@ JOB_TYPE_MAP = {
 }
 
 
+REQUIRED_FIELDS = {"title", "job_url"}
+
+FIELD_TYPES = {
+    "source": str,
+    "ats_platform": str,
+    "title": str,
+    "company": str,
+    "location": str,
+    "country": str,
+    "date_posted": str,
+    "job_type": str,
+    "experience_level": str,
+    "is_remote": bool,
+    "salary_min": (int, float),
+    "salary_max": (int, float),
+    "salary_currency": str,
+    "salary_interval": str,
+    "job_url": str,
+    "company_url": str,
+    "description": str,
+    "language": str,
+    "ai_score": (int, float),
+    "ai_reasoning": str,
+    "ai_cover_letter": str,
+    "ai_resume_bullets": str,
+}
+
+
+def validate_job(job: dict) -> dict:
+    """Validate and coerce a job dict to match the unified schema.
+
+    - Ensures all schema fields exist (fills missing with None).
+    - Coerces values to expected types where possible.
+    - Drops the job (returns empty dict) if required fields are missing.
+    """
+    for field in UNIFIED_SCHEMA_FIELDS:
+        job.setdefault(field, None)
+
+    for req in REQUIRED_FIELDS:
+        val = job.get(req)
+        if not val or (isinstance(val, str) and not val.strip()):
+            logger.debug("Job dropped — missing required field '%s': %s", req, job.get("job_url", "?"))
+            return {}
+
+    for field, expected in FIELD_TYPES.items():
+        val = job.get(field)
+        if val is None:
+            continue
+        if not isinstance(val, expected):
+            try:
+                if expected is bool:
+                    job[field] = bool(val)
+                elif expected is str:
+                    job[field] = str(val)
+                elif expected == (int, float):
+                    job[field] = float(val)
+                else:
+                    job[field] = expected(val)
+            except (ValueError, TypeError):
+                job[field] = None
+
+    return job
+
+
 def normalize_jobs(jobs: list[dict]) -> list[dict]:
     """
     Normalize a list of job dicts to ensure consistency with the unified schema.
@@ -77,16 +141,22 @@ def normalize_jobs(jobs: list[dict]) -> list[dict]:
         List of cleaned, normalized job dicts.
     """
     normalized = []
+    dropped = 0
     for i, job in enumerate(jobs):
         try:
-            clean = _normalize_single(job)
+            validated = validate_job(job)
+            if not validated:
+                dropped += 1
+                continue
+            clean = _normalize_single(validated)
             normalized.append(clean)
         except Exception as e:
             logger.warning("Error normalizing job %d: %s", i, e)
-            # Still try to include it with whatever data we have
             fallback = {field: job.get(field) for field in UNIFIED_SCHEMA_FIELDS}
             normalized.append(fallback)
 
+    if dropped:
+        logger.info("Dropped %d jobs with missing required fields.", dropped)
     logger.info("Normalized %d jobs.", len(normalized))
     return normalized
 

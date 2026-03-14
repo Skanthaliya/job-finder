@@ -168,10 +168,19 @@ with st.sidebar:
     with col1:
         use_indeed = st.checkbox("Indeed", value=True)
         use_linkedin = st.checkbox("LinkedIn", value=True)
-        use_google_jobs = st.checkbox("Google Jobs", value=True)
+        use_google_jobs = st.checkbox(
+            "Google Jobs", value=False,
+            help="⚠️ Unreliable — often returns 0 results due to blocking.",
+        )
     with col2:
-        use_glassdoor = st.checkbox("Glassdoor", value=False)
-        use_ziprecruiter = st.checkbox("ZipRecruiter", value=False)
+        use_glassdoor = st.checkbox(
+            "Glassdoor", value=False,
+            help="⚠️ Unreliable — frequently returns 403 errors.",
+        )
+        use_ziprecruiter = st.checkbox(
+            "ZipRecruiter", value=False,
+            help="⚠️ Unreliable — blocked by Cloudflare WAF (429/403).",
+        )
         use_naukri = st.checkbox("Naukri (India)", value=False)
 
     st.markdown("**ATS Discovery (Company Career Pages)**")
@@ -603,14 +612,43 @@ if st.session_state.search_results is not None:
                 label = f"{bm_icon}**{title}** at {company} — {location_str}"
 
             with st.expander(label):
-                # Bookmark button
-                bm_label = "Remove Bookmark" if is_bookmarked else "⭐ Bookmark"
-                if st.button(bm_label, key=f"bm_{i}"):
-                    if is_bookmarked:
-                        st.session_state.bookmarked_jobs.discard(job_key)
-                    else:
-                        st.session_state.bookmarked_jobs.add(job_key)
-                    st.rerun()
+                # Bookmark + Track buttons
+                bm_col, track_col = st.columns([1, 1])
+                with bm_col:
+                    bm_label = "Remove Bookmark" if is_bookmarked else "⭐ Bookmark"
+                    if st.button(bm_label, key=f"bm_{i}"):
+                        if is_bookmarked:
+                            st.session_state.bookmarked_jobs.discard(job_key)
+                        else:
+                            st.session_state.bookmarked_jobs.add(job_key)
+                        st.rerun()
+                with track_col:
+                    try:
+                        from tracking.tracker import save_job as _save_tracked, get_job as _get_tracked, update_status as _update_tracked, VALID_STATUSES
+                        tracked = _get_tracked(job_key)
+                        if tracked:
+                            current_status = tracked["status"]
+                            new_status = st.selectbox(
+                                "Status",
+                                options=sorted(VALID_STATUSES),
+                                index=sorted(VALID_STATUSES).index(current_status),
+                                key=f"track_sel_{i}",
+                                label_visibility="collapsed",
+                            )
+                            if new_status != current_status:
+                                _update_tracked(job_key, new_status)
+                                st.rerun()
+                        else:
+                            if st.button("💾 Save to Tracker", key=f"track_{i}"):
+                                _save_tracked(
+                                    job_url=job_key,
+                                    title=title,
+                                    company=company,
+                                    location=location_str,
+                                )
+                                st.rerun()
+                    except Exception:
+                        pass
 
                 if scored:
                     if score >= 70:
@@ -749,7 +787,7 @@ if st.session_state.search_results is not None:
         # --- Download Buttons ---
         st.divider()
         st.markdown("### 📥 Download Results")
-        dl_col1, dl_col2, dl_col3 = st.columns(3)
+        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
 
         with dl_col1:
             if filepath and os.path.exists(filepath):
@@ -774,6 +812,17 @@ if st.session_state.search_results is not None:
             )
 
         with dl_col3:
+            import json as _json
+            json_data = _json.dumps(jobs, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+            st.download_button(
+                label="📋 Download JSON",
+                data=json_data,
+                file_name=f"jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+        with dl_col4:
             if st.session_state.cover_letters:
                 import io
                 import zipfile
@@ -901,6 +950,27 @@ if st.session_state.search_results is not None:
                 st.error(f"Scoring failed: {e}")
                 logger.error("AI scoring failed: %s", e, exc_info=True)
 
+        # --- Skills Extraction & Salary Estimation ---
+        if st.session_state.ai_scores_done:
+            st.divider()
+            ai_extra_col1, ai_extra_col2 = st.columns(2)
+            with ai_extra_col1:
+                if st.button("🧠 Extract Skills", use_container_width=True, key="skills_btn"):
+                    from processing.skills_extractor import extract_skills_batch
+                    with st.spinner("Extracting skills from job descriptions..."):
+                        extract_skills_batch(jobs, gemini_model)
+                    st.session_state.search_results = jobs
+                    st.success("Skills extracted!")
+                    st.rerun()
+            with ai_extra_col2:
+                if st.button("💰 Estimate Salaries", use_container_width=True, key="salary_btn"):
+                    from processing.salary_estimator import estimate_salaries
+                    with st.spinner("Estimating salaries for jobs without salary data..."):
+                        estimate_salaries(jobs, gemini_model)
+                    st.session_state.search_results = jobs
+                    st.success("Salary estimates added!")
+                    st.rerun()
+
         # --- Scored Results Table ---
         if st.session_state.ai_scores_done:
             st.markdown("#### 🏆 Top Matches")
@@ -937,7 +1007,36 @@ if st.session_state.search_results is not None:
             )
 
 # =============================================================================
+# Application Tracker
+# =============================================================================
+try:
+    from tracking.tracker import get_stats, get_all as get_all_tracked, VALID_STATUSES
+    stats = get_stats()
+    if stats.get("total", 0) > 0:
+        st.divider()
+        st.markdown("### 📊 Application Tracker")
+        stat_cols = st.columns(len(stats))
+        for i, (status, count) in enumerate(sorted(stats.items())):
+            with stat_cols[i % len(stat_cols)]:
+                st.metric(status.title(), count)
+
+        tracker_filter = st.selectbox(
+            "Filter by status",
+            options=["All"] + sorted(VALID_STATUSES),
+            key="tracker_filter",
+        )
+        tracked_jobs = get_all_tracked(tracker_filter if tracker_filter != "All" else None)
+        if tracked_jobs:
+            for tj in tracked_jobs[:20]:
+                st.text(
+                    f"[{tj['status'].upper()}] {tj['title']} at {tj['company']} "
+                    f"— saved {tj['date_saved'][:10]}"
+                )
+except Exception as e:
+    logger.debug("Application tracker display failed: %s", e)
+
+# =============================================================================
 # Footer
 # =============================================================================
 st.markdown("---")
-st.caption("Job Finder v2.0 — India + Global support. Respect rate limits and terms of service.")
+st.caption("Job Finder v2.1 — India + Global support. Respect rate limits and terms of service.")

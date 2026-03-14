@@ -50,9 +50,12 @@ def scrape_foundit(
     else:
         terms_list = []
 
-    loc = location
-    if not loc and search_locations:
-        loc = search_locations[0]
+    if search_locations:
+        loc = ", ".join(search_locations)
+    elif location:
+        loc = location
+    else:
+        loc = ""
 
     if progress_callback:
         progress_callback(f"Foundit.in: Searching for {len(terms_list)} roles in '{loc}'...")
@@ -91,8 +94,8 @@ def _search_foundit(
 
     for page in range(1, max_pages + 1):
         try:
-            # Foundit.in uses a search URL pattern
-            search_url = f"https://www.foundit.in/srp/results?searchId=&query={search_term}&locations={location}&page={page}"
+            loc_param = f"&locations={location}" if location else ""
+            search_url = f"https://www.foundit.in/srp/results?searchId=&query={search_term}{loc_param}&page={page}"
 
             resp = requests.get(
                 search_url,

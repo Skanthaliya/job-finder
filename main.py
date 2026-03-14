@@ -232,10 +232,12 @@ def run_search(
 
     if not all_jobs:
         _progress("No jobs found. Try broadening your search criteria.")
-        # Still create an empty output file
         if output_format == "csv":
             from output.csv_writer import write_csv
             filepath = write_csv([])
+        elif output_format == "json":
+            from output.json_writer import write_json
+            filepath = write_json([])
         else:
             from output.excel_writer import write_excel
             filepath = write_excel([])
@@ -329,6 +331,9 @@ def run_search(
     if output_format == "csv":
         from output.csv_writer import write_csv
         filepath = write_csv(all_jobs)
+    elif output_format == "json":
+        from output.json_writer import write_json
+        filepath = write_json(all_jobs)
     else:
         from output.excel_writer import write_excel
         filepath = write_excel(all_jobs)
@@ -622,7 +627,7 @@ def main() -> None:
     parser.add_argument("--career-crawler", action="store_true", help="Enable career page crawler")
     parser.add_argument("--serpapi", action="store_true", help="Enable SerpAPI dorking")
     parser.add_argument("--format", dest="output_format", default="excel",
-                        choices=["excel", "csv"], help="Output format (default: excel)")
+                        choices=["excel", "csv", "json"], help="Output format (default: excel)")
     parser.add_argument("--sites", nargs="+", default=None,
                         help="JobSpy sites to use (e.g., indeed linkedin google)")
 

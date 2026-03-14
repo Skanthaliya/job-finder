@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from config import ATS_PATTERNS, USER_AGENTS, REQUEST_TIMEOUT
+from processing.search_filter import matches_search_terms_strict
 
 logger = logging.getLogger(__name__)
 
@@ -286,8 +287,9 @@ def _discover_and_scrape_one(
 
     ats = result.get("ats")
     slug = result.get("slug")
+    career_url = result.get("career_url")
 
-    if not ats or not slug:
+    if not slug and not career_url:
         return []
 
     try:
@@ -306,6 +308,10 @@ def _discover_and_scrape_one(
         elif ats == "personio":
             from scrapers.ats.personio import scrape_personio_company
             all_jobs = scrape_personio_company(slug, search_term=None, location=None)
+        elif career_url:
+            from scrapers.ats.generic import scrape_generic
+            job = scrape_generic(career_url)
+            all_jobs = [job] if job else []
         else:
             return []
     except Exception as e:
@@ -316,23 +322,8 @@ def _discover_and_scrape_one(
         return []
 
     matched = []
-    search_terms_lower = [t.lower() for t in search_terms]
-
     for job in all_jobs:
-        title = (job.get("title") or "").lower()
-        desc = (job.get("description") or "").lower()
-
-        term_match = False
-        for term in search_terms_lower:
-            words = term.split()
-            if all(w in title for w in words):
-                term_match = True
-                break
-            if all(w in desc for w in words):
-                term_match = True
-                break
-
-        if not term_match:
+        if not matches_search_terms_strict(job, search_terms):
             continue
 
         if loc_filters:

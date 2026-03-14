@@ -14,6 +14,7 @@ import time
 from urllib.parse import urlparse
 
 from scrapers.ats.base import BaseATSScraper
+from scrapers.ats.utils import strip_html as _strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -332,19 +333,6 @@ class WorkdayScraper(BaseATSScraper):
             pass
 
         return job
-
-
-def _strip_html(html_text: str) -> str:
-    """Strip HTML tags from text."""
-    text = re.sub(r"<br\s*/?>", "\n", html_text)
-    text = re.sub(r"<p>", "\n", text)
-    text = re.sub(r"</p>", "\n", text)
-    text = re.sub(r"<li>", "\n• ", text)
-    text = re.sub(r"<[^>]+>", "", text)
-    from html import unescape
-    text = unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
 
 
 # Module-level instance

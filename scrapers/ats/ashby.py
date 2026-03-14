@@ -9,9 +9,10 @@ No authentication required. Returns JSON with job postings.
 
 import logging
 import re
-from html import unescape
 
 from scrapers.ats.base import BaseATSScraper
+from scrapers.ats.utils import strip_html as _strip_html
+from processing.search_filter import matches_search_term, matches_location
 
 logger = logging.getLogger(__name__)
 
@@ -88,28 +89,16 @@ class AshbyScraper(BaseATSScraper):
             all_jobs = data.get("jobs", [])
             logger.info("Ashby %s: %d total jobs found.", company_slug, len(all_jobs))
 
-            search_lower = search_term.lower() if search_term else ""
-            location_lower = location.lower() if location else ""
-
             for item in all_jobs:
                 try:
                     mapped = self._map_job(item, company_slug)
                     if not mapped:
                         continue
 
-                    # Filter by search term
-                    if search_lower:
-                        title = (mapped.get("title") or "").lower()
-                        desc = (mapped.get("description") or "").lower()
-                        search_words = search_lower.split()
-                        if not any(w in title or w in desc for w in search_words):
-                            continue
-
-                    # Filter by location
-                    if location_lower:
-                        job_loc = (mapped.get("location") or "").lower()
-                        if location_lower not in job_loc:
-                            continue
+                    if search_term and not matches_search_term(mapped, search_term):
+                        continue
+                    if location and not matches_location(mapped, location):
+                        continue
 
                     jobs.append(mapped)
 
@@ -214,18 +203,6 @@ class AshbyScraper(BaseATSScraper):
 
         job["company_url"] = f"https://jobs.ashbyhq.com/{company_slug}"
         return job
-
-
-def _strip_html(html_text: str) -> str:
-    """Strip HTML tags from text."""
-    text = re.sub(r"<br\s*/?>", "\n", html_text)
-    text = re.sub(r"<p>", "\n", text)
-    text = re.sub(r"</p>", "\n", text)
-    text = re.sub(r"<li>", "\n• ", text)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
 
 
 # Module-level instance

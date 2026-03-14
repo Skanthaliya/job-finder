@@ -8,10 +8,10 @@ Attempts XML feed first, falls back to HTML scraping.
 import logging
 import re
 import xml.etree.ElementTree as ET
-from html import unescape
 from urllib.parse import urlparse
 
 from scrapers.ats.base import BaseATSScraper
+from processing.search_filter import matches_search_term, matches_location
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +100,6 @@ class PersonioScraper(BaseATSScraper):
         jobs = []
         root = ET.fromstring(xml_text)
 
-        search_lower = search_term.lower() if search_term else ""
-        location_lower = location.lower() if location else ""
-
         for position in root.iter("position"):
             try:
                 job = self._empty_job()
@@ -112,14 +109,11 @@ class PersonioScraper(BaseATSScraper):
 
                 job["title"] = _get_xml_text(position, "name")
                 job["location"] = _get_xml_text(position, "office")
-                job["department"] = _get_xml_text(position, "department")
 
-                # Job URL
                 job_id = _get_xml_text(position, "id")
                 if job_id:
                     job["job_url"] = f"https://{company_slug}.jobs.personio.de/job/{job_id}"
 
-                # Description
                 desc_parts = []
                 for field_name in ["jobDescription", "description", "recruitingCategory"]:
                     text = _get_xml_text(position, field_name)
@@ -127,26 +121,19 @@ class PersonioScraper(BaseATSScraper):
                         desc_parts.append(text)
                 job["description"] = "\n\n".join(desc_parts) if desc_parts else None
 
-                # Date
                 created = _get_xml_text(position, "createdAt")
                 if created:
                     job["date_posted"] = created[:10]
 
-                # Employment type
                 schedule = _get_xml_text(position, "schedule") or ""
                 if "full" in schedule.lower():
                     job["job_type"] = "fulltime"
                 elif "part" in schedule.lower():
                     job["job_type"] = "parttime"
 
-                # Filter
-                if search_lower:
-                    searchable = f"{job.get('title', '')} {job.get('description', '')}".lower()
-                    words = search_lower.split()
-                    if not any(w in searchable for w in words):
-                        continue
-
-                if location_lower and location_lower not in (job.get("location") or "").lower():
+                if search_term and not matches_search_term(job, search_term):
+                    continue
+                if location and not matches_location(job, location):
                     continue
 
                 job["company_url"] = f"https://{company_slug}.jobs.personio.de"
@@ -178,9 +165,6 @@ class PersonioScraper(BaseATSScraper):
                 # Try broader search
                 job_elements = soup.find_all("a", href=re.compile(r"/job/\d+"))
 
-            search_lower = search_term.lower() if search_term else ""
-            location_lower = location.lower() if location else ""
-
             for elem in job_elements:
                 try:
                     job = self._empty_job()
@@ -188,25 +172,21 @@ class PersonioScraper(BaseATSScraper):
                     job["ats_platform"] = "personio"
                     job["company"] = company_slug.replace("-", " ").title()
 
-                    # Title from link text
                     title_elem = elem.select_one(".job-title, .position-title, h3, h4") or elem
                     job["title"] = title_elem.get_text(strip=True)
 
-                    # URL
                     href = elem.get("href", "")
                     if href and not href.startswith("http"):
                         href = base_url.rstrip("/") + "/" + href.lstrip("/")
                     job["job_url"] = href
 
-                    # Location
                     loc_elem = elem.select_one(".job-location, .position-location, .location")
                     if loc_elem:
                         job["location"] = loc_elem.get_text(strip=True)
 
-                    # Filter
-                    if search_lower and search_lower not in (job.get("title") or "").lower():
+                    if search_term and not matches_search_term(job, search_term):
                         continue
-                    if location_lower and location_lower not in (job.get("location") or "").lower():
+                    if location and not matches_location(job, location):
                         continue
 
                     job["company_url"] = base_url

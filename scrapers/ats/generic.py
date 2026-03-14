@@ -7,7 +7,6 @@ Uses requests + BeautifulSoup to extract whatever job information is available.
 
 import logging
 import re
-from html import unescape
 from urllib.parse import urlparse
 
 import requests

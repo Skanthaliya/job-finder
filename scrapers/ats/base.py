@@ -8,12 +8,15 @@ from BaseATSScraper and implement the scrape_job() and scrape_company() methods.
 from abc import ABC, abstractmethod
 import logging
 import random
+import time
 
 import requests
 
 from config import USER_AGENTS, REQUEST_TIMEOUT, MAX_RETRIES
 
 logger = logging.getLogger(__name__)
+
+_BACKOFF_DELAYS = [2, 5, 15, 30]
 
 
 class BaseATSScraper(ABC):
@@ -33,6 +36,7 @@ class BaseATSScraper(ABC):
         """
         Perform a GET request with retries, timeout, and User-Agent rotation.
 
+        Uses exponential backoff with jitter on 429 (rate-limited) responses.
         Returns the Response object on success, or None on failure.
         """
         for attempt in range(1, self.max_retries + 1):
@@ -51,9 +55,11 @@ class BaseATSScraper(ABC):
                     self.__class__.__name__, status, attempt, self.max_retries, url,
                 )
                 if status == 429:
-                    logger.warning("Rate limited. Waiting 30 seconds...")
-                    import time
-                    time.sleep(30)
+                    delay = _BACKOFF_DELAYS[min(attempt - 1, len(_BACKOFF_DELAYS) - 1)]
+                    jitter = random.uniform(0, delay * 0.5)
+                    wait = delay + jitter
+                    logger.warning("Rate limited. Backing off %.1fs...", wait)
+                    time.sleep(wait)
             except requests.exceptions.RequestException as e:
                 logger.warning(
                     "[%s] Request error on attempt %d/%d for %s: %s",
@@ -66,6 +72,7 @@ class BaseATSScraper(ABC):
         """
         Perform a POST request with retries, timeout, and User-Agent rotation.
 
+        Uses exponential backoff with jitter on 429 (rate-limited) responses.
         Returns the Response object on success, or None on failure.
         """
         for attempt in range(1, self.max_retries + 1):
@@ -81,8 +88,11 @@ class BaseATSScraper(ABC):
                     self.__class__.__name__, status, attempt, self.max_retries, url,
                 )
                 if status == 429:
-                    import time
-                    time.sleep(30)
+                    delay = _BACKOFF_DELAYS[min(attempt - 1, len(_BACKOFF_DELAYS) - 1)]
+                    jitter = random.uniform(0, delay * 0.5)
+                    wait = delay + jitter
+                    logger.warning("Rate limited on POST. Backing off %.1fs...", wait)
+                    time.sleep(wait)
             except requests.exceptions.RequestException as e:
                 logger.warning(
                     "[%s] POST error on attempt %d/%d for %s: %s",
