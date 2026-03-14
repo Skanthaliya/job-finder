@@ -15,6 +15,7 @@ from typing import Callable
 import google.generativeai as genai
 
 from config import GEMINI_RATE_LIMIT_DELAY, GEMINI_BATCH_SIZE
+from ai.gemini_utils import generate_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +135,11 @@ def score_job(job: dict, profile_text: str, model: genai.GenerativeModel) -> dic
         description=(job.get("description") or "")[:3000],
     )
 
-    response = model.generate_content(prompt)
-    parsed = _parse_json_response(response.text)
+    text = generate_with_retry(model, prompt)
+    if not text:
+        return {"score": 0, "reasoning": "Gemini returned no usable response", "pros": [], "cons": []}
+
+    parsed = _parse_json_response(text)
 
     if isinstance(parsed, dict) and "score" in parsed:
         return {
@@ -228,8 +232,21 @@ def _score_batch(
         jobs_block=jobs_block,
     )
 
-    response = model.generate_content(prompt)
-    parsed = _parse_json_response(response.text)
+    text = generate_with_retry(model, prompt)
+    if not text:
+        logger.warning("Batch scoring got no response, falling back to single scoring")
+        results = []
+        for job in batch:
+            try:
+                result = score_job(job, profile_text, model)
+                results.append(result)
+                time.sleep(GEMINI_RATE_LIMIT_DELAY)
+            except Exception as e:
+                logger.error("Single score fallback failed: %s", e)
+                results.append({"score": 0, "reasoning": f"Error: {e}", "pros": [], "cons": []})
+        return results
+
+    parsed = _parse_json_response(text)
 
     if isinstance(parsed, list):
         results = []

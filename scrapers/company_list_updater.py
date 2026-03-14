@@ -59,6 +59,12 @@ GITHUB_SOURCES_ALTERNATIVES = [
         "ats": "greenhouse",
         "parser": "json_list",
     },
+    {
+        "name": "Lever companies (alt)",
+        "url": "https://raw.githubusercontent.com/Joshuah143/JOB_BOARD_SCRAPER/main/lever_companies.json",
+        "ats": "lever",
+        "parser": "json_list",
+    },
 ]
 
 

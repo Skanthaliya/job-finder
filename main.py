@@ -29,7 +29,11 @@ from config import (
     JOBSPY_SITES,
     LOG_FILE,
     LOG_LEVEL,
+    SCRAPER_TIMEOUT,
 )
+from filtering.date_filter import filter_by_date
+from filtering.language_filter import filter_by_language
+from filtering.location_filter import filter_by_location
 
 # Configure logging
 def setup_logging() -> None:
@@ -74,6 +78,9 @@ def run_search(
     enable_ats_discovery: bool = True,
     enable_arbeitnow: bool = True,
     enable_remotive: bool = False,
+    enable_foundit: bool = False,
+    enable_instahyre: bool = False,
+    enable_career_crawler: bool = False,
     enable_serpapi: bool = False,
     serpapi_key: str = "",
     output_format: str = "excel",
@@ -97,6 +104,9 @@ def run_search(
         enable_ats_discovery: Enable direct ATS API discovery.
         enable_arbeitnow: Enable Arbeitnow API.
         enable_remotive: Enable Remotive API.
+        enable_foundit: Enable Foundit.in (India) scraper.
+        enable_instahyre: Enable Instahyre.com (India) scraper.
+        enable_career_crawler: Enable career page discovery crawler.
         enable_serpapi: Enable SerpAPI-based dorking.
         serpapi_key: SerpAPI key (overrides env var).
         output_format: "excel" or "csv".
@@ -118,8 +128,8 @@ def run_search(
         if progress_callback:
             try:
                 progress_callback(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Progress callback failed: %s", e)
 
     terms_display = ", ".join(f"'{t}'" for t in search_terms)
     _progress(f"🔍 Starting job search: [{terms_display}] in '{location}', {country}")
@@ -179,6 +189,22 @@ def run_search(
                 search_terms, location, search_locations, hours_old, _progress,
             )
 
+        # --- Foundit.in (India) ---
+        if enable_foundit:
+            _progress("Launching Foundit.in scraper...")
+            futures["foundit"] = executor.submit(
+                _run_foundit_safe,
+                search_terms, location, search_locations, _progress,
+            )
+
+        # --- Instahyre (India) ---
+        if enable_instahyre:
+            _progress("Launching Instahyre scraper...")
+            futures["instahyre"] = executor.submit(
+                _run_instahyre_safe,
+                search_terms, location, search_locations, _progress,
+            )
+
         # --- SerpAPI Dorking (optional) ---
         if enable_serpapi:
             _progress("Launching SerpAPI Dorking...")
@@ -191,7 +217,7 @@ def run_search(
         # Collect results
         for name, future in futures.items():
             try:
-                result = future.result(timeout=300)  # 5-minute timeout per scraper
+                result = future.result(timeout=SCRAPER_TIMEOUT)
                 if result:
                     all_jobs.extend(result)
                     sources_used.append(name)
@@ -225,21 +251,7 @@ def run_search(
     # =========================================================================
     # 2.5 Filter by date (removes stale ATS Discovery results)
     # =========================================================================
-    if hours_old and hours_old < 8760:  # Only filter if less than 1 year
-        from datetime import datetime, timedelta
-        cutoff_date = (datetime.now() - timedelta(hours=hours_old)).strftime("%Y-%m-%d")
-        pre_date_count = len(all_jobs)
-        date_filtered = []
-        for j in all_jobs:
-            posted = j.get("date_posted")
-            if not posted:
-                date_filtered.append(j)
-            elif posted >= cutoff_date:
-                date_filtered.append(j)
-        removed_by_date = pre_date_count - len(date_filtered)
-        if removed_by_date > 0:
-            all_jobs = date_filtered
-            _progress(f"Date filter: removed {removed_by_date} jobs older than {hours_old}h (before {cutoff_date})")
+    all_jobs = filter_by_date(all_jobs, hours_old, progress_callback=_progress)
 
     # =========================================================================
     # 3. Detect languages
@@ -251,153 +263,12 @@ def run_search(
     # =========================================================================
     # 4. Apply language filter
     # =========================================================================
-    if language_filter and language_filter != "All":
-        pre_filter_count = len(all_jobs)
-        filtered_jobs = []
-        for j in all_jobs:
-            lang = j.get("language", "unknown")
-
-            if language_filter == "English":
-                # Keep: English, English (German plus), unknown with short desc
-                if lang in ("English", "English (German plus)"):
-                    filtered_jobs.append(j)
-                elif lang == "unknown":
-                    desc = j.get("description") or ""
-                    if len(desc.strip()) < 50:
-                        filtered_jobs.append(j)
-
-            elif language_filter == "English (German plus)":
-                # Only jobs where German is explicitly a plus
-                if lang == "English (German plus)":
-                    filtered_jobs.append(j)
-
-            elif language_filter == "German":
-                # Keep: German, English (German plus)
-                if lang in ("German", "English (German plus)"):
-                    filtered_jobs.append(j)
-
-            else:
-                # Other languages: exact match + unknown
-                if lang == language_filter or lang == "unknown":
-                    filtered_jobs.append(j)
-
-        all_jobs = filtered_jobs
-        filtered_count = pre_filter_count - len(all_jobs)
-        _progress(f"Language filter '{language_filter}': kept {len(all_jobs)}, removed {filtered_count}")
+    all_jobs = filter_by_language(all_jobs, language_filter, progress_callback=_progress)
 
     # =========================================================================
     # 4.5 Apply location filter (for Country/Europe scope)
     # =========================================================================
-    if search_locations:
-        pre_count = len(all_jobs)
-        loc_filters = [loc.lower() for loc in search_locations]
-        
-        # Add common city names for Germany
-        if "Germany" in search_locations or "germany" in loc_filters:
-            german_cities = [
-                "berlin", "munich", "münchen", "hamburg", "frankfurt", 
-                "cologne", "köln", "düsseldorf", "stuttgart", "dresden",
-                "leipzig", "hannover", "nuremberg", "nürnberg", "dortmund",
-                "essen", "bremen", "bonn", "mannheim", "karlsruhe",
-                "freiburg", "heidelberg", "mainz", "wiesbaden", "potsdam",
-                "rostock", "kiel", "augsburg", "aachen", "regensburg",
-                "darmstadt", "wolfsburg", "ingolstadt", "ulm", "bielefeld",
-            ]
-            loc_filters.extend(german_cities)
-        
-        # Countries where user CAN work remotely from
-        ALLOWED_REMOTE_COUNTRIES = [
-            "germany", "austria", "switzerland", "netherlands", "belgium",
-            "france", "uk", "united kingdom", "ireland", "sweden", "denmark",
-            "norway", "finland", "spain", "italy", "portugal", "poland",
-            "czech republic", "luxembourg", "estonia", "latvia", "lithuania",
-            "india", "europe", "eu", "emea", "eea", "dach",
-        ]
-        
-        # Keywords meaning truly global remote (no country restriction)
-        GLOBAL_REMOTE_KEYWORDS = [
-            "worldwide", "anywhere", "global", "work from anywhere",
-            "fully remote", "100% remote", "remote-first",
-        ]
-        
-        # Countries the user CANNOT work from remotely
-        BLOCKED_REMOTE_COUNTRIES = [
-            "united states", "usa", "u.s.", "us only",
-            "canada only", "australia only", "japan only",
-            "china only", "korea only", "brazil only",
-            "latin america", "latam only",
-        ]
-        
-        filtered_jobs = []
-        for j in all_jobs:
-            job_loc = (j.get("location") or "").lower()
-            job_title = (j.get("title") or "").lower()
-            is_remote_flag = j.get("is_remote", False)
-            
-            # --- REMOTE JOB HANDLING ---
-            is_remote_job = (
-                is_remote_flag
-                or "remote" in job_loc
-                or "remote" in job_title
-                or "home office" in job_loc
-                or "wfh" in job_loc
-            )
-            
-            if is_remote_job:
-                # Check if remote is restricted to a blocked country
-                is_blocked_remote = any(
-                    blocked in job_loc for blocked in BLOCKED_REMOTE_COUNTRIES
-                )
-                
-                if is_blocked_remote:
-                    logger.debug("Blocked remote: %s | %s", 
-                               j.get("title", "?")[:40], job_loc[:40])
-                    continue
-                
-                # Check if remote is in an allowed country or global
-                is_global = any(kw in job_loc for kw in GLOBAL_REMOTE_KEYWORDS)
-                is_allowed = any(c in job_loc for c in ALLOWED_REMOTE_COUNTRIES)
-                is_no_location = len(job_loc.replace("remote", "").strip(" -,/")) < 3
-                
-                if is_global or is_allowed or is_no_location:
-                    filtered_jobs.append(j)
-                    continue
-                
-                # Remote with unknown location — keep (benefit of doubt)
-                filtered_jobs.append(j)
-                continue
-            
-            # --- NON-REMOTE JOB HANDLING ---
-            
-            # No location info — keep
-            if not job_loc or len(job_loc.strip()) < 2:
-                filtered_jobs.append(j)
-                continue
-            
-            # Location matches our country/city filter
-            if any(loc in job_loc for loc in loc_filters):
-                filtered_jobs.append(j)
-                continue
-            
-            # German locale codes
-            if ", de" in job_loc or "germany" in job_loc or "deutschland" in job_loc:
-                filtered_jobs.append(j)
-                continue
-            
-            # If Europe scope — keep all (multiple countries selected)
-            if len(search_locations) > 1:
-                filtered_jobs.append(j)
-                continue
-            
-            # Doesn't match — filter out
-            logger.debug("Location filtered: %s | %s", 
-                        j.get("title", "?")[:40], job_loc[:40])
-        
-        all_jobs = filtered_jobs
-        removed = pre_count - len(all_jobs)
-        if removed > 0:
-            _progress(f"Location filter: removed {removed} jobs outside {search_locations[0]} "
-                     f"(kept valid remote + EU/India remote)")
+    all_jobs = filter_by_location(all_jobs, search_locations, progress_callback=_progress)
 
     # =========================================================================
     # 5. Deduplicate
@@ -406,6 +277,35 @@ def run_search(
     from processing.deduplicator import deduplicate
     all_jobs = deduplicate(all_jobs)
     _progress(f"After deduplication: {len(all_jobs)} unique jobs")
+
+    # =========================================================================
+    # 5.5 Career Page Crawler (discover hidden jobs from company domains)
+    # =========================================================================
+    if enable_career_crawler and all_jobs:
+        try:
+            _progress("Career Crawler: Extracting company domains from results...")
+            from scrapers.career_page_crawler import extract_domains_from_jobs, crawl_career_pages
+
+            domains = extract_domains_from_jobs(all_jobs)
+            if domains:
+                _progress(f"Career Crawler: Found {len(domains)} unique company domains. Crawling...")
+                loc_filters = [loc.lower() for loc in search_locations] if search_locations else []
+                crawler_jobs = crawl_career_pages(
+                    domains=domains,
+                    search_terms=search_terms,
+                    loc_filters=loc_filters,
+                    max_domains=30,
+                    progress_callback=_progress,
+                )
+                if crawler_jobs:
+                    all_jobs.extend(crawler_jobs)
+                    _progress(f"Career Crawler: Added {len(crawler_jobs)} hidden jobs")
+                    from processing.deduplicator import deduplicate as _dedup2
+                    all_jobs = _dedup2(all_jobs)
+                    _progress(f"After re-dedup: {len(all_jobs)} unique jobs")
+        except Exception as e:
+            logger.warning("Career crawler failed: %s", e)
+            _progress(f"Career Crawler error: {e}")
 
     # =========================================================================
     # 6. Auto-learn new companies from results
@@ -474,12 +374,13 @@ def _run_jobspy_safe(
 
                     df = scrape_jobs(**scrape_params)
                     if df is not None and not df.empty:
-                        for _, row in df.iterrows():
+                        for row in df.to_dict(orient="records"):
                             try:
                                 job = _map_jobspy_row(row)
                                 if job and job.get("job_url"):
                                     all_results.append(job)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug("Error mapping JobSpy row: %s", e)
                                 continue
                         progress_callback(f"JobSpy: {site}/{term} → {len(df)} results")
                     else:
@@ -488,22 +389,22 @@ def _run_jobspy_safe(
                     logger.warning("JobSpy %s/%s failed: %s", site, term, e)
                     try:
                         progress_callback(f"JobSpy: {site}/{term} failed: {str(e)[:60]}")
-                    except Exception:
-                        pass
+                    except Exception as cb_err:
+                        logger.debug("Progress callback failed: %s", cb_err)
                     continue
 
     except ImportError:
         logger.error("python-jobspy is not installed. Run: pip install python-jobspy")
         try:
             progress_callback("Error: python-jobspy not installed.")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
     except Exception as e:
         logger.error("JobSpy safe wrapper failed: %s", e, exc_info=True)
         try:
             progress_callback(f"JobSpy error: {e}")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
 
     return all_results
 
@@ -528,8 +429,8 @@ def _run_arbeitnow_safe(
         logger.error("Arbeitnow safe wrapper failed: %s", e, exc_info=True)
         try:
             progress_callback(f"Arbeitnow error: {e}")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
         return []
 
 
@@ -551,8 +452,8 @@ def _run_remotive_safe(
         logger.error("Remotive safe wrapper failed: %s", e, exc_info=True)
         try:
             progress_callback(f"Remotive error: {e}")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
         return []
 
 
@@ -576,8 +477,54 @@ def _run_ats_discovery_safe(
         logger.error("ATS Discovery safe wrapper failed: %s", e, exc_info=True)
         try:
             progress_callback(f"ATS Discovery error: {e}")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
+        return []
+
+
+def _run_foundit_safe(
+    search_terms: list[str], location: str,
+    search_locations: list[str] | None,
+    progress_callback: Callable[[str], None],
+) -> list[dict]:
+    """Safely run the Foundit.in scraper."""
+    try:
+        from scrapers.apis.foundit import scrape_foundit
+        return scrape_foundit(
+            search_terms=search_terms,
+            location=location,
+            search_locations=search_locations,
+            progress_callback=progress_callback,
+        )
+    except Exception as e:
+        logger.error("Foundit safe wrapper failed: %s", e, exc_info=True)
+        try:
+            progress_callback(f"Foundit error: {e}")
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
+        return []
+
+
+def _run_instahyre_safe(
+    search_terms: list[str], location: str,
+    search_locations: list[str] | None,
+    progress_callback: Callable[[str], None],
+) -> list[dict]:
+    """Safely run the Instahyre scraper."""
+    try:
+        from scrapers.apis.instahyre import scrape_instahyre
+        return scrape_instahyre(
+            search_terms=search_terms,
+            location=location,
+            search_locations=search_locations,
+            progress_callback=progress_callback,
+        )
+    except Exception as e:
+        logger.error("Instahyre safe wrapper failed: %s", e, exc_info=True)
+        try:
+            progress_callback(f"Instahyre error: {e}")
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
         return []
 
 
@@ -612,8 +559,8 @@ def _run_serpapi_safe(
 
         try:
             progress_callback(f"SerpAPI: Routing {len(urls)} discovered URLs to ATS scrapers...")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
 
         jobs = route_and_scrape(
             urls=urls,
@@ -628,8 +575,8 @@ def _run_serpapi_safe(
         logger.error("SerpAPI safe wrapper failed: %s", e, exc_info=True)
         try:
             progress_callback(f"SerpAPI error: {e}")
-        except Exception:
-            pass
+        except Exception as cb_err:
+            logger.debug("Progress callback failed: %s", cb_err)
         return []
 
 
@@ -670,6 +617,9 @@ def main() -> None:
     parser.add_argument("--no-ats", action="store_true", help="Disable ATS Discovery")
     parser.add_argument("--no-arbeitnow", action="store_true", help="Disable Arbeitnow API")
     parser.add_argument("--remotive", action="store_true", help="Enable Remotive API")
+    parser.add_argument("--foundit", action="store_true", help="Enable Foundit.in (India)")
+    parser.add_argument("--instahyre", action="store_true", help="Enable Instahyre (India)")
+    parser.add_argument("--career-crawler", action="store_true", help="Enable career page crawler")
     parser.add_argument("--serpapi", action="store_true", help="Enable SerpAPI dorking")
     parser.add_argument("--format", dest="output_format", default="excel",
                         choices=["excel", "csv"], help="Output format (default: excel)")
@@ -708,6 +658,9 @@ def main() -> None:
         enable_ats_discovery=not args.no_ats,
         enable_arbeitnow=not args.no_arbeitnow,
         enable_remotive=args.remotive,
+        enable_foundit=args.foundit,
+        enable_instahyre=args.instahyre,
+        enable_career_crawler=args.career_crawler,
         enable_serpapi=args.serpapi,
         output_format=args.output_format,
         progress_callback=cli_progress,

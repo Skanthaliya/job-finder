@@ -3,32 +3,41 @@ processing/deduplicator.py — Deduplication logic for job results.
 
 Identifies duplicate jobs by URL or by title+company match, merges data
 from duplicates, and returns a deduplicated list. Uses fuzzy title
-normalization to catch variants like "Sr." vs "Senior".
+normalization to catch variants like "Sr." vs "Senior", plus rapidfuzz
+for catching near-duplicate titles across different boards.
 """
 
 import logging
 import re
 from urllib.parse import urlparse, urlunparse
 
+try:
+    from rapidfuzz import fuzz as _fuzz
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    RAPIDFUZZ_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+FUZZY_TITLE_THRESHOLD = 85
 
 # Common title abbreviation mappings for fuzzy matching
 TITLE_NORMALIZATIONS = {
-    r"\bsr\.?\b": "senior",
-    r"\bjr\.?\b": "junior",
-    r"\bmgr\.?\b": "manager",
-    r"\beng\.?\b": "engineer",
-    r"\bdev\.?\b": "developer",
-    r"\bdir\.?\b": "director",
+    r"\bsr\.?(?=\s|$)": "senior",
+    r"\bjr\.?(?=\s|$)": "junior",
+    r"\bmgr\.?(?=\s|$)": "manager",
+    r"\beng\.?(?=\s|$)": "engineer",
+    r"\bdev\.?(?=\s|$)": "developer",
+    r"\bdir\.?(?=\s|$)": "director",
     r"\bvp\b": "vice president",
-    r"\bassoc\.?\b": "associate",
-    r"\basst\.?\b": "assistant",
-    r"\badmin\.?\b": "administrator",
-    r"\bcoord\.?\b": "coordinator",
-    r"\bspec\.?\b": "specialist",
-    r"\bexec\.?\b": "executive",
-    r"\bops\.?\b": "operations",
-    r"\btech\.?\b": "technical",
+    r"\bassoc\.?(?=\s|$)": "associate",
+    r"\basst\.?(?=\s|$)": "assistant",
+    r"\badmin\.?(?=\s|$)": "administrator",
+    r"\bcoord\.?(?=\s|$)": "coordinator",
+    r"\bspec\.?(?=\s|$)": "specialist",
+    r"\bexec\.?(?=\s|$)": "executive",
+    r"\bops\.?(?=\s|$)": "operations",
+    r"\btech\.?(?=\s|$)": "technical",
     r"\bswe\b": "software engineer",
     r"\bpm\b": "product manager",
     r"\bpo\b": "product owner",
@@ -95,6 +104,13 @@ def deduplicate(jobs: list[dict]) -> list[dict]:
             existing_idx = url_index[normalized_url]
         elif title_company_key and title_company_key in title_company_index:
             existing_idx = title_company_index[title_company_key]
+
+        # Fuzzy title matching: catch near-duplicates like
+        # "Senior Product Owner" vs "Senior Product Owner, Digital"
+        if existing_idx is None and RAPIDFUZZ_AVAILABLE and norm_title and norm_company:
+            existing_idx = _find_fuzzy_match(
+                norm_title, norm_company, title_company_index, result
+            )
 
         if existing_idx is not None:
             # Merge: keep the one with more data
@@ -183,6 +199,32 @@ def _normalize_company(company: str) -> str:
     )
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
+
+
+def _find_fuzzy_match(
+    norm_title: str,
+    norm_company: str,
+    title_company_index: dict[str, int],
+    result: list[dict],
+) -> int | None:
+    """Find a fuzzy match for a title+company pair in the existing index.
+
+    Uses rapidfuzz token_sort_ratio to catch near-duplicates where titles
+    differ slightly (e.g., extra qualifiers, reordered words).
+    Only matches when the company names are very similar (ratio >= 90).
+    """
+    for key, idx in title_company_index.items():
+        existing_title, existing_company = key.split("|||", 1)
+
+        company_score = _fuzz.ratio(norm_company, existing_company)
+        if company_score < 90:
+            continue
+
+        title_score = _fuzz.token_sort_ratio(norm_title, existing_title)
+        if title_score >= FUZZY_TITLE_THRESHOLD:
+            return idx
+
+    return None
 
 
 def _merge_jobs(existing: dict, new: dict) -> dict:

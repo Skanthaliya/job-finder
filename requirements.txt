@@ -1,5 +1,5 @@
 # Core
-python-jobspy>=1.1.75
+python-jobspy>=1.1.79
 openpyxl>=3.1.0
 langdetect>=1.0.9
 streamlit>=1.30.0
@@ -9,11 +9,21 @@ requests>=2.31.0
 lxml>=5.0.0
 python-dotenv>=1.0.0
 
+# Fuzzy deduplication
+rapidfuzz>=3.0.0
+
 # Optional: Google dorking (legacy, rate-limited)
 googlesearch-python>=1.2.0
 
-# AI features (Phase 2 — now active)
-google-generativeai>=0.5.0
+# AI features (Gemini 2.5 Flash)
+google-generativeai>=0.8.0
+
+# Security
+bleach>=6.0.0
+
+# Testing
+pytest>=8.0.0
 
 # Note: SerpAPI uses requests (already included) — no extra package needed
 # Sign up for free API key at https://serpapi.com
+# Note: python-jobspy now supports naukri (India) and bayt (Middle East)

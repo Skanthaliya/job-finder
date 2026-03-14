@@ -15,6 +15,7 @@ from datetime import datetime
 
 import streamlit as st
 import pandas as pd
+import bleach
 
 # Ensure the project root is in the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,11 +31,26 @@ from config import (
     JOB_TYPE_OPTIONS,
     LANGUAGE_FILTER_OPTIONS,
     JOBSPY_SITES,
+    COUNTRY_JOBSPY_SITES,
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    GEMINI_MODEL_OPTIONS,
 )
 
 logger = logging.getLogger(__name__)
+
+_SAFE_HTML_TAGS = [
+    "p", "br", "b", "i", "strong", "em", "ul", "ol", "li", "a",
+    "h1", "h2", "h3", "h4", "h5", "span", "div", "table", "tr", "td", "th",
+    "thead", "tbody", "pre", "code", "blockquote", "hr", "dl", "dt", "dd",
+]
+_SAFE_HTML_ATTRS = {
+    "a": ["href", "target", "rel"],
+    "div": ["style"],
+    "span": ["style"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
+}
 
 # =============================================================================
 # Page Configuration
@@ -54,20 +70,12 @@ st.markdown("""
     .main-header {
         font-size: 2.5rem;
         font-weight: 700;
-        color: #1a73e8;
         margin-bottom: 0.5rem;
     }
     .sub-header {
         font-size: 1.1rem;
-        color: #666;
+        opacity: 0.7;
         margin-bottom: 2rem;
-    }
-    .metric-card {
-        background-color: #f8f9fa;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        border: 1px solid #e0e0e0;
     }
     .stButton > button[kind="primary"] {
         width: 100%;
@@ -77,6 +85,7 @@ st.markdown("""
     div[data-testid="stExpander"] details summary p {
         font-size: 1rem;
     }
+    .bookmark-btn { cursor: pointer; font-size: 1.2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,6 +104,14 @@ if "ai_scores_done" not in st.session_state:
     st.session_state.ai_scores_done = False
 if "cover_letters" not in st.session_state:
     st.session_state.cover_letters = {}
+if "resume_bullets" not in st.session_state:
+    st.session_state.resume_bullets = {}
+if "bookmarked_jobs" not in st.session_state:
+    st.session_state.bookmarked_jobs = set()
+if "job_page" not in st.session_state:
+    st.session_state.job_page = 0
+
+JOBS_PER_PAGE = 25
 
 
 # =============================================================================
@@ -155,6 +172,7 @@ with st.sidebar:
     with col2:
         use_glassdoor = st.checkbox("Glassdoor", value=False)
         use_ziprecruiter = st.checkbox("ZipRecruiter", value=False)
+        use_naukri = st.checkbox("Naukri (India)", value=False)
 
     st.markdown("**ATS Discovery (Company Career Pages)**")
     enable_ats_discovery = st.checkbox(
@@ -168,8 +186,18 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         use_arbeitnow = st.checkbox("Arbeitnow", value=True)
+        use_foundit = st.checkbox("Foundit (India)", value=False)
     with col2:
         use_remotive = st.checkbox("Remotive", value=False)
+        use_instahyre = st.checkbox("Instahyre (India)", value=False)
+
+    st.markdown("**Career Page Crawler**")
+    enable_career_crawler = st.checkbox(
+        "Enable Career Crawler",
+        value=False,
+        help="Discovers hidden jobs by crawling company career pages found in results. "
+             "Detects ATS platforms and scrapes additional listings not on job boards.",
+    )
 
     st.markdown("**SerpAPI Dorking (Optional)**")
     enable_serpapi = st.checkbox(
@@ -189,8 +217,8 @@ with st.sidebar:
             from scrapers.serpapi_dorker import get_monthly_usage
             usage = get_monthly_usage()
             st.caption(f"Monthly usage: {usage}/100 queries")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load SerpAPI usage: %s", e)
 
     st.divider()
 
@@ -250,6 +278,13 @@ with st.sidebar:
         help="Get a free key at https://aistudio.google.com/apikey",
     )
 
+    selected_gemini_model = st.selectbox(
+        "AI Model",
+        options=GEMINI_MODEL_OPTIONS,
+        index=0,
+        help="2.5-flash: better reasoning, slightly higher cost. 2.0-flash: faster, cheaper.",
+    )
+
     st.markdown("**Your CV / Profile**")
     st.caption("Paste your CV text below. If empty, falls back to `my_profile.txt` → `my_profile.json`.")
     cv_text_input = st.text_area(
@@ -274,6 +309,8 @@ if use_glassdoor:
     jobspy_sites.append("glassdoor")
 if use_ziprecruiter:
     jobspy_sites.append("zip_recruiter")
+if use_naukri:
+    jobspy_sites.append("naukri")
 
 enable_jobspy = len(jobspy_sites) > 0
 
@@ -303,6 +340,12 @@ with col_info:
         active_sources.append("Arbeitnow")
     if use_remotive:
         active_sources.append("Remotive")
+    if use_foundit:
+        active_sources.append("Foundit")
+    if use_instahyre:
+        active_sources.append("Instahyre")
+    if enable_career_crawler:
+        active_sources.append("Career Crawler")
     if enable_serpapi and serpapi_key:
         active_sources.append("SerpAPI")
     st.caption(f"Active sources: {' | '.join(active_sources)}")
@@ -319,6 +362,9 @@ if search_clicked:
     st.session_state.progress_messages = []
     st.session_state.ai_scores_done = False
     st.session_state.cover_letters = {}
+    st.session_state.resume_bullets = {}
+    st.session_state.bookmarked_jobs = set()
+    st.session_state.job_page = 0
 
     # Set up logging for Streamlit
     from main import setup_logging, run_search
@@ -329,7 +375,7 @@ if search_clicked:
     status_area = st.empty()
 
     step_count = [0]
-    total_steps = sum([enable_jobspy, enable_ats_discovery, use_arbeitnow, use_remotive, enable_serpapi]) + 4
+    total_steps = sum([enable_jobspy, enable_ats_discovery, use_arbeitnow, use_remotive, use_foundit, use_instahyre, enable_career_crawler, enable_serpapi]) + 4
     progress_log = []  # Thread-safe regular list instead of session_state
 
     def streamlit_progress(msg: str) -> None:
@@ -339,8 +385,8 @@ if search_clicked:
             step_count[0] += 0.5
             progress_pct = min(step_count[0] / (total_steps * 3), 0.98)
             progress_bar.progress(progress_pct, text=msg[:100])
-        except Exception:
-            pass  # Silently ignore progress update failures from threads
+        except Exception as e:
+            logger.debug("Progress update failed (thread-safe): %s", e)
 
     try:
         with st.spinner("Searching for jobs..."):
@@ -359,6 +405,9 @@ if search_clicked:
                 enable_ats_discovery=enable_ats_discovery,
                 enable_arbeitnow=use_arbeitnow,
                 enable_remotive=use_remotive,
+                enable_foundit=use_foundit,
+                enable_instahyre=use_instahyre,
+                enable_career_crawler=enable_career_crawler,
                 enable_serpapi=enable_serpapi and bool(serpapi_key),
                 serpapi_key=serpapi_key,
                 output_format="excel",
@@ -395,11 +444,12 @@ if st.session_state.search_results is not None:
         from ai.profile_loader import load_profile
         profile_text = load_profile(cv_text_input)
         gemini_model = None
+        active_model_name = selected_gemini_model if selected_gemini_model else GEMINI_MODEL
         if gemini_api_key:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_api_key)
-                gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+                gemini_model = genai.GenerativeModel(active_model_name)
             except Exception as e:
                 logger.warning("Failed to initialize Gemini: %s", e)
 
@@ -501,32 +551,75 @@ if st.session_state.search_results is not None:
             hide_index=True,
         )
 
-        # --- Unified Job Detail Expanders ---
+        # --- Bookmarked Jobs ---
+        bookmarked_count = len(st.session_state.bookmarked_jobs)
+        if bookmarked_count > 0:
+            with st.expander(f"⭐ Bookmarked Jobs ({bookmarked_count})", expanded=False):
+                for j in jobs:
+                    jk = j.get("job_url", "")
+                    if jk in st.session_state.bookmarked_jobs:
+                        bm_col1, bm_col2 = st.columns([5, 1])
+                        with bm_col1:
+                            st.write(f"**{j.get('title', 'Untitled')}** at {j.get('company', '?')} — {j.get('location', '')}")
+                        with bm_col2:
+                            if st.button("Remove", key=f"unbm_{jk[:40]}"):
+                                st.session_state.bookmarked_jobs.discard(jk)
+                                st.rerun()
+
+        # --- Unified Job Detail Expanders with Pagination ---
         st.markdown("### 📄 Job Details")
-        st.caption("Click on a job to expand and view its full description.")
+
+        total_jobs = len(jobs)
+        total_pages = max(1, (total_jobs + JOBS_PER_PAGE - 1) // JOBS_PER_PAGE)
+        current_page = min(st.session_state.job_page, total_pages - 1)
+
+        page_start = current_page * JOBS_PER_PAGE
+        page_end = min(page_start + JOBS_PER_PAGE, total_jobs)
+
+        st.caption(f"Showing jobs {page_start + 1}-{page_end} of {total_jobs}")
 
         scored = st.session_state.ai_scores_done
 
-        for i, job in enumerate(jobs[:50]):
+        for i in range(page_start, page_end):
+            job = jobs[i]
             title = job.get("title", "Untitled")
             company = job.get("company", "Unknown")
             location_str = job.get("location", "")
             score = job.get("ai_score", 0)
+            job_key = job.get("job_url", f"job_{i}")
+            is_bookmarked = job_key in st.session_state.bookmarked_jobs
 
             if scored:
                 if score >= 70:
-                    badge = f"🟢 {score}"
+                    badge = f"🟢 {score} High Match"
                 elif score >= 40:
-                    badge = f"🟡 {score}"
+                    badge = f"🟡 {score} Medium Match"
                 else:
-                    badge = f"🔴 {score}"
-                label = f"{badge} — **{title}** at {company} — {location_str}"
+                    badge = f"🔴 {score} Low Match"
+                bm_icon = "⭐ " if is_bookmarked else ""
+                label = f"{bm_icon}{badge} — **{title}** at {company} — {location_str}"
             else:
-                label = f"**{title}** at {company} — {location_str}"
+                bm_icon = "⭐ " if is_bookmarked else ""
+                label = f"{bm_icon}**{title}** at {company} — {location_str}"
 
             with st.expander(label):
+                # Bookmark button
+                bm_label = "Remove Bookmark" if is_bookmarked else "⭐ Bookmark"
+                if st.button(bm_label, key=f"bm_{i}"):
+                    if is_bookmarked:
+                        st.session_state.bookmarked_jobs.discard(job_key)
+                    else:
+                        st.session_state.bookmarked_jobs.add(job_key)
+                    st.rerun()
+
                 if scored:
-                    st.markdown(f"**AI Score:** {score}/100")
+                    if score >= 70:
+                        score_label = "High Match"
+                    elif score >= 40:
+                        score_label = "Medium Match"
+                    else:
+                        score_label = "Low Match"
+                    st.markdown(f"**AI Score:** {score}/100 ({score_label})")
                     st.markdown(f"**Reasoning:** {job.get('ai_reasoning', 'N/A')}")
 
                     pros = job.get("ai_pros", [])
@@ -567,7 +660,8 @@ if st.session_state.search_results is not None:
                 if desc:
                     st.markdown("---")
                     if "<" in desc and ">" in desc:
-                        st.html(f'<div style="max-height:400px;overflow-y:auto;font-size:0.9rem;">{desc}</div>')
+                        sanitized = bleach.clean(desc, tags=_SAFE_HTML_TAGS, attributes=_SAFE_HTML_ATTRS, strip=True)
+                        st.html(f'<div style="max-height:400px;overflow-y:auto;font-size:0.9rem;">{sanitized}</div>')
                     else:
                         st.text(desc[:5000])
                 else:
@@ -578,7 +672,6 @@ if st.session_state.search_results is not None:
                     st.markdown("---")
                     job_lang = job.get("language", "English")
                     cover_lang = "German" if "German" in (job_lang or "") else "English"
-                    job_key = job.get("job_url", f"job_{i}")
 
                     if job_key in st.session_state.cover_letters:
                         st.markdown("**Generated Cover Letter:**")
@@ -609,13 +702,54 @@ if st.session_state.search_results is not None:
                             st.session_state.search_results = jobs
                             st.rerun()
 
-        if len(jobs) > 50:
-            st.info(f"Showing first 50 of {len(jobs)} jobs. Download the Excel file for all results.")
+                    # Resume tailoring
+                    if job_key in st.session_state.resume_bullets:
+                        st.markdown("**Tailored Resume Bullets:**")
+                        bullets = st.session_state.resume_bullets[job_key]
+                        st.text_area(
+                            "Resume Bullets",
+                            value=bullets,
+                            height=300,
+                            key=f"rb_display_{i}",
+                            label_visibility="collapsed",
+                        )
+                        st.download_button(
+                            "📥 Download Resume Bullets",
+                            data=bullets,
+                            file_name=f"resume_{company.replace(' ', '_')}_{title.replace(' ', '_')[:30]}.txt",
+                            mime="text/plain",
+                            key=f"rb_download_{i}",
+                        )
+                    else:
+                        if st.button(f"📄 Tailor Resume ({cover_lang})", key=f"rb_btn_{i}"):
+                            from ai.resume_tailor import generate_tailored_bullets
+                            with st.spinner("Tailoring resume bullets..."):
+                                bullets = generate_tailored_bullets(
+                                    job, profile_text, gemini_model, language=cover_lang,
+                                )
+                            st.session_state.resume_bullets[job_key] = bullets
+                            job["ai_resume_bullets"] = bullets
+                            st.session_state.search_results = jobs
+                            st.rerun()
+
+        # Pagination controls
+        if total_pages > 1:
+            pg_col1, pg_col2, pg_col3 = st.columns([1, 3, 1])
+            with pg_col1:
+                if st.button("← Previous", disabled=(current_page == 0), key="pg_prev"):
+                    st.session_state.job_page = max(0, current_page - 1)
+                    st.rerun()
+            with pg_col2:
+                st.markdown(f"<div style='text-align:center'>Page {current_page + 1} of {total_pages}</div>", unsafe_allow_html=True)
+            with pg_col3:
+                if st.button("Next →", disabled=(current_page >= total_pages - 1), key="pg_next"):
+                    st.session_state.job_page = min(total_pages - 1, current_page + 1)
+                    st.rerun()
 
         # --- Download Buttons ---
         st.divider()
         st.markdown("### 📥 Download Results")
-        dl_col1, dl_col2 = st.columns(2)
+        dl_col1, dl_col2, dl_col3 = st.columns(3)
 
         with dl_col1:
             if filepath and os.path.exists(filepath):
@@ -629,7 +763,6 @@ if st.session_state.search_results is not None:
                     )
 
         with dl_col2:
-            # Generate CSV on-the-fly for download
             csv_df = pd.DataFrame(jobs)
             csv_data = csv_df.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
@@ -639,6 +772,23 @@ if st.session_state.search_results is not None:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+        with dl_col3:
+            if st.session_state.cover_letters:
+                import io
+                import zipfile
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for cl_key, cl_text in st.session_state.cover_letters.items():
+                        safe_name = cl_key.split("/")[-1][:40].replace(" ", "_") if "/" in cl_key else cl_key[:40].replace(" ", "_")
+                        zf.writestr(f"cover_letter_{safe_name}.txt", cl_text)
+                st.download_button(
+                    label=f"📦 All Cover Letters ({len(st.session_state.cover_letters)})",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"cover_letters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
     # =========================================================================
     # Company Registry Stats
@@ -673,8 +823,8 @@ if st.session_state.search_results is not None:
                     for company in recent:
                         st.text(f"{company.get('company_name', 'Unknown')} ({company['ats']}) "
                                f"— from {company.get('discovered_from', '?')}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Company registry display failed: %s", e)
 
     # =========================================================================
     # AI Features — Scoring & Cover Letters
@@ -708,7 +858,7 @@ if st.session_state.search_results is not None:
                 st.success("Scoring complete! Jobs are sorted by AI score.")
             else:
                 st.caption(
-                    f"Scores each job 1-100 against your profile using {GEMINI_MODEL}. "
+                    f"Scores each job 1-100 against your profile using {active_model_name}. "
                     f"This takes ~{len(jobs) * 4 // 60 + 1} min for {len(jobs)} jobs."
                 )
 
@@ -729,8 +879,8 @@ if st.session_state.search_results is not None:
                         progress_bar.progress(pct, text=msg)
                     else:
                         status_text.caption(msg)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Scoring progress update failed: %s", e)
 
             try:
                 scored_jobs = score_jobs_batch(
@@ -790,4 +940,4 @@ if st.session_state.search_results is not None:
 # Footer
 # =============================================================================
 st.markdown("---")
-st.caption("Job Finder v1.0 — Built for personal use. Respect rate limits and terms of service.")
+st.caption("Job Finder v2.0 — India + Global support. Respect rate limits and terms of service.")

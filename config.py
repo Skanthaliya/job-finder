@@ -37,6 +37,8 @@ DEFAULT_LOCATION_SCOPE = "Country"  # Default scope: Country (not City)
 DEFAULT_COUNTRY = "Germany"
 DEFAULT_HOURS_OLD = 168  # 7 days
 DEFAULT_RESULTS_PER_SITE = 50
+HOURS_IN_YEAR = 8760
+SCRAPER_TIMEOUT = 300  # 5-minute timeout per scraper
 
 # =============================================================================
 # Location Scope
@@ -51,6 +53,52 @@ EUROPEAN_COUNTRIES = [
 ]
 
 # =============================================================================
+# Location Filter Data
+# =============================================================================
+GERMAN_CITIES = [
+    "berlin", "munich", "münchen", "hamburg", "frankfurt",
+    "cologne", "köln", "düsseldorf", "stuttgart", "dresden",
+    "leipzig", "hannover", "nuremberg", "nürnberg", "dortmund",
+    "essen", "bremen", "bonn", "mannheim", "karlsruhe",
+    "freiburg", "heidelberg", "mainz", "wiesbaden", "potsdam",
+    "rostock", "kiel", "augsburg", "aachen", "regensburg",
+    "darmstadt", "wolfsburg", "ingolstadt", "ulm", "bielefeld",
+]
+
+INDIAN_CITIES = [
+    "bangalore", "bengaluru", "mumbai", "hyderabad", "pune",
+    "delhi", "new delhi", "ncr", "delhi ncr", "gurgaon", "gurugram",
+    "noida", "greater noida", "ghaziabad", "faridabad",
+    "chennai", "kolkata", "ahmedabad", "jaipur", "lucknow",
+    "kochi", "cochin", "thiruvananthapuram", "trivandrum",
+    "chandigarh", "indore", "bhopal", "nagpur", "coimbatore",
+    "visakhapatnam", "vizag", "mysore", "mysuru", "mangalore",
+    "mangaluru", "vadodara", "surat", "rajkot", "gandhinagar",
+    "bhubaneswar", "patna", "ranchi", "dehradun", "shimla",
+    "goa", "panaji", "pondicherry", "puducherry",
+]
+
+ALLOWED_REMOTE_COUNTRIES = [
+    "germany", "austria", "switzerland", "netherlands", "belgium",
+    "france", "uk", "united kingdom", "ireland", "sweden", "denmark",
+    "norway", "finland", "spain", "italy", "portugal", "poland",
+    "czech republic", "luxembourg", "estonia", "latvia", "lithuania",
+    "india", "europe", "eu", "emea", "eea", "dach",
+]
+
+GLOBAL_REMOTE_KEYWORDS = [
+    "worldwide", "anywhere", "global", "work from anywhere",
+    "fully remote", "100% remote", "remote-first",
+]
+
+BLOCKED_REMOTE_COUNTRIES = [
+    "united states", "usa", "u.s.", "us only",
+    "canada only", "australia only", "japan only",
+    "china only", "korea only", "brazil only",
+    "latin america", "latam only",
+]
+
+# =============================================================================
 # SerpAPI (optional — free tier: 100 searches/month)
 # =============================================================================
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
@@ -58,7 +106,18 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 # =============================================================================
 # JobSpy Sites
 # =============================================================================
-JOBSPY_SITES = ["indeed", "linkedin", "google", "glassdoor", "zip_recruiter"]
+JOBSPY_SITES = ["indeed", "linkedin", "google", "glassdoor", "zip_recruiter", "naukri", "bayt"]
+
+# Country-specific site recommendations (auto-enabled when country matches)
+COUNTRY_JOBSPY_SITES = {
+    "India": ["indeed", "linkedin", "google", "glassdoor", "naukri"],
+    "UAE": ["indeed", "linkedin", "google", "bayt"],
+    "Saudi Arabia": ["indeed", "linkedin", "google", "bayt"],
+    "Qatar": ["indeed", "linkedin", "google", "bayt"],
+    "Bahrain": ["indeed", "linkedin", "google", "bayt"],
+    "Kuwait": ["indeed", "linkedin", "google", "bayt"],
+    "Oman": ["indeed", "linkedin", "google", "bayt"],
+}
 
 # =============================================================================
 # Google Dorking
@@ -131,6 +190,16 @@ GERMAN_EXTRA_DORKS = [
     '"{keyword}" "{location}" "Stellenangebot"',
 ]
 
+INDIA_EXTRA_DORKS = [
+    'site:naukri.com "{keyword}" "{location}"',
+    'site:foundit.in "{keyword}" "{location}"',
+    'site:instahyre.com "{keyword}" "{location}"',
+    'site:cutshort.io "{keyword}" "{location}"',
+    '"{keyword}" "{location}" "hiring" site:linkedin.com/jobs India',
+    '"{keyword}" "{location}" careers -site:naukri.com -site:linkedin.com -site:indeed.com',
+    'inurl:careers "{keyword}" "{location}" India',
+]
+
 # =============================================================================
 # HTTP Settings
 # =============================================================================
@@ -160,7 +229,8 @@ LOG_LEVEL = "INFO"
 # AI / Gemini
 # =============================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL_OPTIONS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 PROFILE_PATH = "my_profile.json"
 PROFILE_TXT_PATH = "my_profile.txt"
 COVER_LETTER_PROMPT_PATH = "cover_letter_prompt.txt"
@@ -174,6 +244,7 @@ COUNTRIES = [
     "Germany",
     "USA",
     "UK",
+    "India",
     "Austria",
     "Switzerland",
     "Netherlands",
@@ -192,8 +263,10 @@ COUNTRIES = [
     "Poland",
     "Czech Republic",
     "Singapore",
-    "India",
     "Japan",
+    "UAE",
+    "Saudi Arabia",
+    "Qatar",
     "Remote / Worldwide",
 ]
 
@@ -223,4 +296,5 @@ LANGUAGE_FILTER_OPTIONS = [
     "German",
     "French",
     "Spanish",
+    "Hindi",
 ]

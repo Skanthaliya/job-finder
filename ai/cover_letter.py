@@ -15,6 +15,7 @@ import os
 import google.generativeai as genai
 
 from config import COVER_LETTER_PROMPT_PATH
+from ai.gemini_utils import generate_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +96,10 @@ def generate_cover_letter(
         output_language=output_language,
     )
 
-    try:
-        response = model.generate_content(prompt)
-        letter = response.text.strip()
-        if not letter:
-            return "Error: Gemini returned an empty response."
-        return letter
-    except Exception as e:
-        logger.error("Cover letter generation failed: %s", e)
-        return f"Error generating cover letter: {e}"
+    letter = generate_with_retry(model, prompt)
+    if not letter:
+        return "Error: Gemini returned an empty or blocked response."
+    return letter
 
 
 def _infer_language(job: dict) -> str:

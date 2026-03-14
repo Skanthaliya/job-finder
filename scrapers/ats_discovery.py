@@ -48,6 +48,21 @@ GREENHOUSE_COMPANIES = [
     "cockroachlabs", "supabase", "vercel", "netlify",
     "render", "remote", "deel", "oyster",
     "pleo", "moss-carbon", "circula",
+    # India — tech companies & startups using Greenhouse
+    "razorpay", "cred", "meesho", "groww", "zerodha",
+    "phonepe", "swiggy", "zomato", "flipkart", "myntra",
+    "freshworks", "chargebee", "browserstack", "postman",
+    "hasura", "clevertap", "moengage", "leadsquared",
+    "druva", "icertis", "innovaccer", "unacademy",
+    "upgrad", "vedantu", "byjus", "physicswallah",
+    "ola", "rapido", "nykaa", "mamaearth", "boat",
+    "dream11", "mpl", "curefit", "practo", "1mg",
+    "lenskart", "pepperfry", "urban-company",
+    "slice", "jupiter", "fi-money", "niyo",
+    "khatabook", "open-financial", "razorpayx",
+    "sharechat", "dailyhunt", "koo-app",
+    "mindtickle", "whatfix", "darwinbox", "leena-ai",
+    "yellow-ai", "haptik", "niki-ai",
 ]
 
 LEVER_COMPANIES = [
@@ -57,6 +72,12 @@ LEVER_COMPANIES = [
     "databricks", "scale",
     "sumup", "wise", "revolut", "monzo", "starling",
     "rows", "wonder", "commercetools", "freighthub",
+    # India — companies using Lever
+    "gojek", "grab", "paytm", "policybazaar",
+    "cars24", "spinny", "droom", "park-plus",
+    "bigbasket", "blinkit", "dunzo", "zepto",
+    "rivigo", "blackbuck", "delhivery",
+    "vyapar", "khatabook", "okcredit",
 ]
 
 ASHBY_COMPANIES = [
@@ -68,6 +89,8 @@ ASHBY_COMPANIES = [
     "vanta", "drata", "snorkel-ai",
     "cohere", "together-ai", "replit",
     "codeium", "cursor", "mistral",
+    # India — companies using Ashby
+    "sarvam-ai", "krutrim", "ola-electric",
 ]
 
 SMARTRECRUITERS_COMPANIES = [
@@ -77,6 +100,9 @@ SMARTRECRUITERS_COMPANIES = [
     "Accenture", "CapGemini", "Atos",
     "DeutschePost", "DHL", "Siemens",
     "Continental", "Infineon", "SAP",
+    # India — large companies using SmartRecruiters
+    "Infosys", "Wipro", "HCLTech", "TechMahindra",
+    "LTIMindtree", "Mphasis", "Persistent",
 ]
 
 PERSONIO_COMPANIES = [
@@ -135,6 +161,15 @@ WORKDAY_CAREER_URLS = {
     "IBM": "https://ibm.wd5.myworkdayjobs.com/en-US/IBM_Careers",
     "Cisco": "https://cisco.wd5.myworkdayjobs.com/en-US/External",
     "Dell": "https://dell.wd1.myworkdayjobs.com/en-US/External",
+    # India — major companies using Workday
+    "TCS": "https://tcs.wd3.myworkdayjobs.com/en-US/TCS",
+    "Infosys": "https://infosys.wd1.myworkdayjobs.com/en-US/Infosys",
+    "Wipro": "https://wipro.wd1.myworkdayjobs.com/en-US/careers",
+    "HCL Technologies": "https://hcltech.wd3.myworkdayjobs.com/en-US/HCLTech",
+    "Reliance": "https://reliance.wd1.myworkdayjobs.com/en-US/Reliance",
+    "Tata Motors": "https://tatamotors.wd3.myworkdayjobs.com/en-US/Careers",
+    "Mahindra": "https://mahindra.wd1.myworkdayjobs.com/en-US/Careers",
+    "Larsen & Toubro": "https://larsentoubro.wd3.myworkdayjobs.com/en-US/LTCareers",
 }
 
 

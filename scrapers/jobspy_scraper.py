@@ -16,9 +16,15 @@ from config import (
     DEFAULT_HOURS_OLD,
     DEFAULT_RESULTS_PER_SITE,
     JOBSPY_SITES,
+    COUNTRY_JOBSPY_SITES,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_sites_for_country(country: str) -> list[str]:
+    """Return the recommended JobSpy sites for a given country."""
+    return COUNTRY_JOBSPY_SITES.get(country, JOBSPY_SITES[:3])
 
 
 def scrape_jobspy(
@@ -50,7 +56,7 @@ def scrape_jobspy(
         List of dicts matching the unified job schema.
     """
     if sites is None:
-        sites = JOBSPY_SITES[:3]  # default: indeed, linkedin, google
+        sites = get_sites_for_country(country_indeed)
 
     if progress_callback:
         progress_callback(f"Starting JobSpy scraper for '{search_term}' in '{location}' on {', '.join(sites)}...")
@@ -88,8 +94,7 @@ def scrape_jobspy(
         if progress_callback:
             progress_callback(f"JobSpy: Found {len(df)} jobs. Mapping to unified schema...")
 
-        # Map DataFrame columns to our unified schema
-        for _, row in df.iterrows():
+        for row in df.to_dict(orient="records"):
             try:
                 job = _map_jobspy_row(row)
                 if job and job.get("job_url"):
@@ -114,12 +119,12 @@ def scrape_jobspy(
     return jobs
 
 
-def _map_jobspy_row(row: pd.Series) -> dict:
+def _map_jobspy_row(row: pd.Series | dict) -> dict:
     """
     Map a single row from the JobSpy DataFrame to the unified job schema.
 
     Args:
-        row: A pandas Series representing one job result from JobSpy.
+        row: A pandas Series or dict representing one job result from JobSpy.
 
     Returns:
         A dict matching the unified schema.
