@@ -9,6 +9,7 @@ Run: streamlit run app.py
 
 import os
 import sys
+import json
 import logging
 import time
 from datetime import datetime
@@ -52,6 +53,46 @@ _SAFE_HTML_ATTRS = {
     "td": ["colspan", "rowspan"],
     "th": ["colspan", "rowspan"],
 }
+
+# =============================================================================
+# Session Persistence Helpers
+# =============================================================================
+_SESSION_FILE = os.path.join("output", "last_session.json")
+
+
+def _save_session() -> None:
+    """Persist current session state to disk so it survives page reloads."""
+    try:
+        os.makedirs("output", exist_ok=True)
+        data = {
+            "search_results": st.session_state.get("search_results"),
+            "output_filepath": st.session_state.get("output_filepath"),
+            "ai_scores_done": st.session_state.get("ai_scores_done", False),
+            "cover_letters": st.session_state.get("cover_letters", {}),
+            "resume_bullets": st.session_state.get("resume_bullets", {}),
+            "bookmarked_jobs": list(st.session_state.get("bookmarked_jobs", set())),
+            "saved_at": datetime.now().isoformat(),
+        }
+        with open(_SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logging.getLogger(__name__).debug("Failed to save session: %s", e)
+
+
+def _load_session() -> dict | None:
+    """Load previously saved session from disk. Returns None if unavailable."""
+    try:
+        if not os.path.exists(_SESSION_FILE):
+            return None
+        with open(_SESSION_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not data.get("search_results"):
+            return None
+        return data
+    except Exception as e:
+        logging.getLogger(__name__).debug("Failed to load session: %s", e)
+        return None
+
 
 # =============================================================================
 # Page Configuration
@@ -121,6 +162,21 @@ if "bookmarked_jobs" not in st.session_state:
     st.session_state.bookmarked_jobs = set()
 if "job_page" not in st.session_state:
     st.session_state.job_page = 0
+if "session_restored" not in st.session_state:
+    st.session_state.session_restored = False
+
+# Auto-restore last session from disk on first load
+if st.session_state.search_results is None and not st.session_state.session_restored:
+    _saved = _load_session()
+    if _saved:
+        st.session_state.search_results = _saved["search_results"]
+        st.session_state.output_filepath = _saved.get("output_filepath")
+        st.session_state.ai_scores_done = _saved.get("ai_scores_done", False)
+        st.session_state.cover_letters = _saved.get("cover_letters", {})
+        st.session_state.resume_bullets = _saved.get("resume_bullets", {})
+        st.session_state.bookmarked_jobs = set(_saved.get("bookmarked_jobs", []))
+        st.session_state.session_restored = True
+        st.toast(f"Restored {len(_saved['search_results'])} jobs from last session", icon="♻️")
 
 JOBS_PER_PAGE = 25
 
@@ -329,6 +385,21 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+    st.divider()
+    if st.button("🗑️ Clear Saved Session", use_container_width=True,
+                 help="Delete saved results and start fresh"):
+        try:
+            if os.path.exists(_SESSION_FILE):
+                os.remove(_SESSION_FILE)
+        except Exception:
+            pass
+        for key in ("search_results", "output_filepath", "ai_scores_done",
+                     "cover_letters", "resume_bullets", "bookmarked_jobs",
+                     "job_page", "session_restored"):
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
 
 # =============================================================================
 # Build jobspy_sites list
@@ -529,6 +600,7 @@ if search_clicked:
                     logger.warning("Auto AI language detection failed (non-fatal): %s", e)
 
         progress_bar.progress(1.0, text="All done!")
+        _save_session()
 
     except Exception as e:
         st.error(f"Search failed: {e}")
@@ -686,6 +758,7 @@ if st.session_state.search_results is not None:
                         with bm_col2:
                             if st.button("Remove", key=f"unbm_{jk[:40]}"):
                                 st.session_state.bookmarked_jobs.discard(jk)
+                                _save_session()
                                 st.rerun()
 
         # --- Unified Job Detail Expanders with Pagination ---
@@ -734,6 +807,7 @@ if st.session_state.search_results is not None:
                             st.session_state.bookmarked_jobs.discard(job_key)
                         else:
                             st.session_state.bookmarked_jobs.add(job_key)
+                        _save_session()
                         st.rerun()
                 with track_col:
                     try:
@@ -855,6 +929,7 @@ if st.session_state.search_results is not None:
                             st.session_state.cover_letters[job_key] = letter
                             job["ai_cover_letter"] = letter
                             st.session_state.search_results = jobs
+                            _save_session()
                             st.rerun()
 
                     # Resume tailoring
@@ -885,6 +960,7 @@ if st.session_state.search_results is not None:
                             st.session_state.resume_bullets[job_key] = bullets
                             job["ai_resume_bullets"] = bullets
                             st.session_state.search_results = jobs
+                            _save_session()
                             st.rerun()
 
         # Pagination controls
@@ -1062,6 +1138,7 @@ if st.session_state.search_results is not None:
                 logger.info("Re-exported Excel with AI scores: %s", new_filepath)
 
                 status_text.empty()
+                _save_session()
                 st.rerun()
             except Exception as e:
                 st.error(f"Scoring failed: {e}")
@@ -1078,6 +1155,7 @@ if st.session_state.search_results is not None:
                         extract_skills_batch(jobs, gemini_model)
                     st.session_state.search_results = jobs
                     st.success("Skills extracted!")
+                    _save_session()
                     st.rerun()
             with ai_extra_col2:
                 if st.button("💰 Estimate Salaries", use_container_width=True, key="salary_btn"):
@@ -1086,6 +1164,7 @@ if st.session_state.search_results is not None:
                         estimate_salaries(jobs, gemini_model)
                     st.session_state.search_results = jobs
                     st.success("Salary estimates added!")
+                    _save_session()
                     st.rerun()
             with ai_extra_col3:
                 pending = sum(1 for j in jobs if not j.get("ai_detected_language"))
@@ -1096,6 +1175,7 @@ if st.session_state.search_results is not None:
                         analyze_languages_batch(jobs, gemini_model)
                     st.session_state.search_results = jobs
                     st.success("AI language detection complete!")
+                    _save_session()
                     st.rerun()
 
         # --- Scored Results Table ---
