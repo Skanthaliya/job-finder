@@ -31,7 +31,8 @@ Company: {company}
 Location: {location}
 Type: {job_type}
 Remote: {is_remote}
-Language requirement: {language}
+Listing written in: {listing_language}
+Language required to speak: {language_required}
 Experience level: {experience_level}
 Salary: {salary}
 Description:
@@ -90,7 +91,8 @@ def _format_job_for_prompt(job: dict, index: int | None = None) -> str:
         f"Location: {job.get('location', 'N/A')}\n"
         f"Type: {job.get('job_type', 'N/A')}\n"
         f"Remote: {job.get('is_remote', 'N/A')}\n"
-        f"Language: {job.get('language', 'N/A')}\n"
+        f"Listing written in: {job.get('listing_language', 'N/A')}\n"
+        f"Language required: {job.get('language_required') or job.get('language', 'N/A')}\n"
         f"Experience: {job.get('experience_level', 'N/A')}\n"
         f"Salary: {_format_salary(job)}\n"
         f"Description:\n{desc}\n"
@@ -129,7 +131,8 @@ def score_job(job: dict, profile_text: str, model: genai.GenerativeModel) -> dic
         location=job.get("location", "N/A"),
         job_type=job.get("job_type", "N/A"),
         is_remote=job.get("is_remote", "N/A"),
-        language=job.get("language", "N/A"),
+        listing_language=job.get("listing_language", "N/A"),
+        language_required=job.get("language_required") or job.get("language", "N/A"),
         experience_level=job.get("experience_level", "N/A"),
         salary=_format_salary(job),
         description=(job.get("description") or "")[:3000],

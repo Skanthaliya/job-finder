@@ -30,6 +30,7 @@ from config import (
     TIME_FILTER_OPTIONS,
     JOB_TYPE_OPTIONS,
     LANGUAGE_FILTER_OPTIONS,
+    LISTING_LANGUAGE_FILTER_OPTIONS,
     JOBSPY_SITES,
     COUNTRY_JOBSPY_SITES,
     GEMINI_API_KEY,
@@ -271,9 +272,24 @@ with st.sidebar:
 
     is_remote = st.checkbox("🏠 Remote Only", value=False)
 
-    language_filter = st.selectbox("🗣️ Language Filter", options=LANGUAGE_FILTER_OPTIONS, index=0)
+    st.markdown("**🗣️ Language Filters**")
+    language_filter = st.selectbox(
+        "Required Language",
+        options=LANGUAGE_FILTER_OPTIONS,
+        index=0,
+        help="Filter by what language the job REQUIRES you to speak.",
+    )
     if language_filter == "All":
         language_filter = None
+
+    listing_language_filter = st.selectbox(
+        "Listing Language",
+        options=LISTING_LANGUAGE_FILTER_OPTIONS,
+        index=0,
+        help="Filter by what language the job description is WRITTEN in.",
+    )
+    if listing_language_filter == "All":
+        listing_language_filter = None
 
     st.divider()
 
@@ -409,6 +425,7 @@ if search_clicked:
                 job_type=job_type,
                 is_remote=is_remote,
                 language_filter=language_filter,
+                listing_language_filter=listing_language_filter,
                 enable_jobspy=enable_jobspy,
                 jobspy_sites=jobspy_sites if enable_jobspy else None,
                 enable_ats_discovery=enable_ats_discovery,
@@ -473,10 +490,10 @@ if st.session_state.search_results is not None:
                 s = s.strip()
                 source_counts[s] = source_counts.get(s, 0) + 1
 
-        # Count by language
+        # Count by language (required)
         lang_counts = {}
         for j in jobs:
-            lang = j.get("language", "unknown")
+            lang = j.get("language_required") or j.get("language", "unknown")
             lang_counts[lang] = lang_counts.get(lang, 0) + 1
 
         with col1:
@@ -502,7 +519,7 @@ if st.session_state.search_results is not None:
                 st.bar_chart(src_df.set_index("Source"))
 
         with chart_col2:
-            st.markdown("#### Jobs by Language")
+            st.markdown("#### Jobs by Required Language")
             if lang_counts:
                 lang_df = pd.DataFrame(
                     list(lang_counts.items()),
@@ -518,7 +535,8 @@ if st.session_state.search_results is not None:
         # Prepare DataFrame for display
         display_cols = [
             "title", "company", "location", "source", "date_posted",
-            "job_type", "experience_level", "is_remote", "language",
+            "job_type", "experience_level", "is_remote",
+            "listing_language", "language_required", "ai_detected_language",
             "salary_min", "salary_max", "salary_currency", "job_url",
         ]
         if st.session_state.ai_scores_done:
@@ -546,7 +564,9 @@ if st.session_state.search_results is not None:
             "location": st.column_config.TextColumn("Location", width="medium"),
             "source": st.column_config.TextColumn("Source", width="small"),
             "date_posted": st.column_config.TextColumn("Posted", width="small"),
-            "language": st.column_config.TextColumn("Language", width="small"),
+            "listing_language": st.column_config.TextColumn("Written In", width="small"),
+            "language_required": st.column_config.TextColumn("Requires", width="small"),
+            "ai_detected_language": st.column_config.TextColumn("AI Language", width="small"),
             "is_remote": st.column_config.CheckboxColumn("Remote", width="small"),
             "salary_min": st.column_config.NumberColumn("Min Salary", format="%.0f"),
             "salary_max": st.column_config.NumberColumn("Max Salary", format="%.0f"),
@@ -683,7 +703,11 @@ if st.session_state.search_results is not None:
                     st.write(f"**Type:** {job.get('job_type', 'N/A')}")
                     st.write(f"**Remote:** {'Yes' if job.get('is_remote') else 'No'}")
                 with meta_col3:
-                    st.write(f"**Language:** {job.get('language', 'N/A')}")
+                    st.write(f"**Written in:** {job.get('listing_language', 'N/A')}")
+                    st.write(f"**Requires:** {job.get('language_required', 'N/A')}")
+                    ai_lang = job.get("ai_detected_language")
+                    if ai_lang:
+                        st.write(f"**AI detected:** {ai_lang}")
                     if job.get("salary_min"):
                         sal = f"{job['salary_currency'] or ''} {job['salary_min']:,.0f}"
                         if job.get("salary_max"):
@@ -708,7 +732,7 @@ if st.session_state.search_results is not None:
                 # Cover letter (only when AI is configured and scoring is done)
                 if scored and gemini_model and profile_text:
                     st.markdown("---")
-                    job_lang = job.get("language", "English")
+                    job_lang = job.get("language_required") or job.get("language", "English")
                     cover_lang = "German" if "German" in (job_lang or "") else "English"
 
                     if job_key in st.session_state.cover_letters:
@@ -950,10 +974,10 @@ if st.session_state.search_results is not None:
                 st.error(f"Scoring failed: {e}")
                 logger.error("AI scoring failed: %s", e, exc_info=True)
 
-        # --- Skills Extraction & Salary Estimation ---
+        # --- Skills Extraction, Salary Estimation & Language Analysis ---
         if st.session_state.ai_scores_done:
             st.divider()
-            ai_extra_col1, ai_extra_col2 = st.columns(2)
+            ai_extra_col1, ai_extra_col2, ai_extra_col3 = st.columns(3)
             with ai_extra_col1:
                 if st.button("🧠 Extract Skills", use_container_width=True, key="skills_btn"):
                     from processing.skills_extractor import extract_skills_batch
@@ -970,6 +994,16 @@ if st.session_state.search_results is not None:
                     st.session_state.search_results = jobs
                     st.success("Salary estimates added!")
                     st.rerun()
+            with ai_extra_col3:
+                pending = sum(1 for j in jobs if not j.get("ai_detected_language"))
+                btn_label = f"🗣️ AI Language ({pending} pending)" if pending else "🗣️ AI Language (all done)"
+                if st.button(btn_label, use_container_width=True, key="lang_btn", disabled=pending == 0):
+                    from ai.language_analyzer import analyze_languages_batch
+                    with st.spinner(f"AI detecting language for {pending} jobs..."):
+                        analyze_languages_batch(jobs, gemini_model)
+                    st.session_state.search_results = jobs
+                    st.success("AI language detection complete!")
+                    st.rerun()
 
         # --- Scored Results Table ---
         if st.session_state.ai_scores_done:
@@ -982,7 +1016,9 @@ if st.session_state.search_results is not None:
                     "Title": j.get("title", ""),
                     "Company": j.get("company", ""),
                     "Location": j.get("location", ""),
-                    "Language": j.get("language", ""),
+                    "Written In": j.get("listing_language", ""),
+                    "Requires": j.get("language_required", ""),
+                    "AI Language": j.get("ai_detected_language", ""),
                     "Reasoning": j.get("ai_reasoning", ""),
                 })
 

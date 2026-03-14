@@ -302,3 +302,13 @@ LANGUAGE_FILTER_OPTIONS = [
     "Spanish",
     "Hindi",
 ]
+
+LISTING_LANGUAGE_FILTER_OPTIONS = [
+    "All",
+    "English",
+    "German",
+    "French",
+    "Spanish",
+    "Hindi",
+    "Dutch",
+]

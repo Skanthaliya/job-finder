@@ -73,6 +73,7 @@ def run_search(
     job_type: str | None = None,
     is_remote: bool = False,
     language_filter: str | None = None,
+    listing_language_filter: str | None = None,
     enable_jobspy: bool = True,
     jobspy_sites: list[str] | None = None,
     enable_ats_discovery: bool = True,
@@ -263,9 +264,13 @@ def run_search(
     all_jobs = detect_languages_batch(all_jobs)
 
     # =========================================================================
-    # 4. Apply language filter
+    # 4. Apply language filters
     # =========================================================================
     all_jobs = filter_by_language(all_jobs, language_filter, progress_callback=_progress)
+
+    if listing_language_filter:
+        from filtering.language_filter import filter_by_listing_language
+        all_jobs = filter_by_listing_language(all_jobs, listing_language_filter, progress_callback=_progress)
 
     # =========================================================================
     # 4.5 Apply location filter (for Country/Europe scope)

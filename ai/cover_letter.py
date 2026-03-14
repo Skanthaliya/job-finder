@@ -91,7 +91,7 @@ def generate_cover_letter(
         location=job.get("location", "N/A"),
         job_type=job.get("job_type", "N/A"),
         is_remote="Yes" if job.get("is_remote") else "No",
-        language=job.get("language", "N/A"),
+        language=job.get("language_required") or job.get("language", "N/A"),
         description=(job.get("description") or "No description available")[:4000],
         output_language=output_language,
     )
@@ -104,7 +104,7 @@ def generate_cover_letter(
 
 def _infer_language(job: dict) -> str:
     """Pick the output language based on the job's detected language field."""
-    lang = (job.get("language") or "").lower()
+    lang = (job.get("language_required") or job.get("language") or "").lower()
     if "german" in lang:
         return "German"
     if "french" in lang:

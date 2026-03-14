@@ -145,17 +145,21 @@ def _format_summary_sheet(ws, jobs: list[dict]) -> None:
 
     url_col_idx = col_indices.get("job_url")
     source_col_idx = col_indices.get("source")
+    listing_lang_col_idx = col_indices.get("listing_language")
+    required_lang_col_idx = col_indices.get("language_required")
+    ai_lang_col_idx = col_indices.get("ai_detected_language")
     lang_col_idx = col_indices.get("language")
     remote_col_idx = col_indices.get("is_remote")
     level_col_idx = col_indices.get("experience_level")
 
-    # Language color scheme
     lang_colors = {
         "English": "C8E6C9",              # Green
         "English (German plus)": "DCEDC8", # Light lime
         "German": "FFCDD2",               # Light red
         "French": "D1C4E9",               # Light purple
         "Dutch": "FFE0B2",                # Light orange
+        "Hindi": "B3E5FC",               # Light blue
+        "Spanish": "FFF9C4",             # Light yellow
         "unknown": "F5F5F5",              # Light gray
     }
 
@@ -171,13 +175,15 @@ def _format_summary_sheet(ws, jobs: list[dict]) -> None:
                 ws.cell(row=row_idx, column=col_idx).fill = row_fill
                 ws.cell(row=row_idx, column=col_idx).border = thin_border
 
-        # Color-code language column
-        if lang_col_idx:
-            lang_val = ws.cell(row=row_idx, column=lang_col_idx).value or ""
+        # Color-code language columns
+        for _lc_idx in (listing_lang_col_idx, required_lang_col_idx, ai_lang_col_idx, lang_col_idx):
+            if not _lc_idx:
+                continue
+            lang_val = ws.cell(row=row_idx, column=_lc_idx).value or ""
             lang_color = lang_colors.get(str(lang_val), None)
             if lang_color:
                 lang_fill = PatternFill(start_color=lang_color, end_color=lang_color, fill_type="solid")
-                ws.cell(row=row_idx, column=lang_col_idx).fill = lang_fill
+                ws.cell(row=row_idx, column=_lc_idx).fill = lang_fill
 
         # Bold "Remote" = True
         if remote_col_idx:
