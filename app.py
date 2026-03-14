@@ -87,6 +87,16 @@ st.markdown("""
         font-size: 1rem;
     }
     .bookmark-btn { cursor: pointer; font-size: 1.2rem; }
+    /* Wrap text in dataframe cells and reduce default column width */
+    div[data-testid="stDataFrame"] td {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        max-width: 180px;
+    }
+    div[data-testid="stDataFrame"] th {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -442,7 +452,83 @@ if search_clicked:
 
         st.session_state.search_results = jobs
         st.session_state.output_filepath = filepath
-        progress_bar.progress(1.0, text="Search complete!")
+        progress_bar.progress(0.70, text="Search complete! Starting AI analysis...")
+
+        # --- Auto-run AI scoring + language detection if Gemini is configured ---
+        from ai.profile_loader import load_profile as _auto_load_profile
+        _auto_profile = _auto_load_profile(cv_text_input)
+        _auto_gemini_model = None
+        _auto_model_name = selected_gemini_model if selected_gemini_model else GEMINI_MODEL
+
+        if gemini_api_key and _auto_profile:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_api_key)
+                _auto_gemini_model = genai.GenerativeModel(_auto_model_name)
+            except Exception as e:
+                logger.warning("Failed to initialize Gemini for auto-scoring: %s", e)
+
+        if _auto_gemini_model and _auto_profile and jobs:
+            # AI Scoring
+            from ai.scorer import score_jobs_batch
+
+            def auto_scoring_progress(msg: str) -> None:
+                try:
+                    import re as _re
+                    m = _re.search(r"(\d+)-\d+ of (\d+)", msg)
+                    if m:
+                        current = int(m.group(1))
+                        total_j = int(m.group(2))
+                        pct = 0.70 + min(current / total_j, 0.99) * 0.20
+                        progress_bar.progress(pct, text=f"AI Scoring: {msg}")
+                    else:
+                        progress_bar.progress(0.75, text=f"AI Scoring: {msg}")
+                except Exception as e:
+                    logger.debug("Auto scoring progress failed: %s", e)
+
+            try:
+                progress_bar.progress(0.72, text=f"AI scoring {len(jobs)} jobs with {_auto_model_name}...")
+                scored_jobs = score_jobs_batch(
+                    jobs, _auto_profile, _auto_gemini_model,
+                    progress_callback=auto_scoring_progress,
+                )
+                st.session_state.search_results = scored_jobs
+                st.session_state.ai_scores_done = True
+                jobs = scored_jobs
+
+                from output.excel_writer import write_excel
+                new_filepath = write_excel(scored_jobs)
+                st.session_state.output_filepath = new_filepath
+                logger.info("Auto-exported Excel with AI scores: %s", new_filepath)
+            except Exception as e:
+                logger.warning("Auto AI scoring failed (non-fatal): %s", e)
+
+            # AI Language Detection
+            pending_lang = sum(1 for j in jobs if not j.get("ai_detected_language"))
+            if pending_lang > 0:
+                from ai.language_analyzer import analyze_languages_batch
+
+                def auto_lang_progress(msg: str) -> None:
+                    try:
+                        progress_bar.progress(0.92, text=f"AI Language: {msg}")
+                    except Exception as e:
+                        logger.debug("Auto lang progress failed: %s", e)
+
+                try:
+                    progress_bar.progress(0.91, text=f"AI detecting language for {pending_lang} jobs...")
+                    analyze_languages_batch(
+                        jobs, _auto_gemini_model,
+                        progress_callback=auto_lang_progress,
+                    )
+                    st.session_state.search_results = jobs
+
+                    from output.excel_writer import write_excel as _write_excel2
+                    new_filepath2 = _write_excel2(jobs)
+                    st.session_state.output_filepath = new_filepath2
+                except Exception as e:
+                    logger.warning("Auto AI language detection failed (non-fatal): %s", e)
+
+        progress_bar.progress(1.0, text="All done!")
 
     except Exception as e:
         st.error(f"Search failed: {e}")
@@ -534,14 +620,26 @@ if st.session_state.search_results is not None:
 
         # Prepare DataFrame for display
         display_cols = [
-            "title", "company", "location", "source", "date_posted",
-            "job_type", "experience_level", "is_remote",
+            "title", "company", "location",
+            "experience_level", "is_remote",
             "listing_language", "language_required", "ai_detected_language",
-            "salary_min", "salary_max", "salary_currency", "job_url",
+            "date_posted", "job_type", "source",
         ]
         if st.session_state.ai_scores_done:
             display_cols.insert(0, "ai_score")
         df = pd.DataFrame(jobs)
+
+        # Make title a clickable link using job_url
+        if "job_url" in df.columns and "title" in df.columns:
+            df["title"] = df.apply(
+                lambda r: r["job_url"] if pd.notna(r.get("job_url")) else r["title"],
+                axis=1,
+            )
+
+        # Sort by date_posted descending (newest first) by default
+        if "date_posted" in df.columns:
+            df = df.sort_values("date_posted", ascending=False, na_position="last")
+
         available_cols = [c for c in display_cols if c in df.columns]
         display_df = df[available_cols].copy()
 
@@ -554,22 +652,17 @@ if st.session_state.search_results is not None:
                 format="%d",
                 width="small",
             ),
-            "job_url": st.column_config.LinkColumn(
-                "Job URL",
-                display_text="Open →",
-                width="medium",
-            ),
-            "title": st.column_config.TextColumn("Title", width="large"),
-            "company": st.column_config.TextColumn("Company", width="medium"),
-            "location": st.column_config.TextColumn("Location", width="medium"),
-            "source": st.column_config.TextColumn("Source", width="small"),
-            "date_posted": st.column_config.TextColumn("Posted", width="small"),
+            "title": st.column_config.LinkColumn("Title", width="small"),
+            "company": st.column_config.TextColumn("Company", width="small"),
+            "location": st.column_config.TextColumn("Location", width="small"),
+            "experience_level": st.column_config.TextColumn("Level", width="small"),
+            "is_remote": st.column_config.CheckboxColumn("Remote", width="small"),
             "listing_language": st.column_config.TextColumn("Written In", width="small"),
             "language_required": st.column_config.TextColumn("Requires", width="small"),
-            "ai_detected_language": st.column_config.TextColumn("AI Language", width="small"),
-            "is_remote": st.column_config.CheckboxColumn("Remote", width="small"),
-            "salary_min": st.column_config.NumberColumn("Min Salary", format="%.0f"),
-            "salary_max": st.column_config.NumberColumn("Max Salary", format="%.0f"),
+            "ai_detected_language": st.column_config.TextColumn("AI Lang", width="small"),
+            "date_posted": st.column_config.TextColumn("Posted", width="small"),
+            "job_type": st.column_config.TextColumn("Type", width="small"),
+            "source": st.column_config.TextColumn("Source", width="small"),
         }
 
         st.dataframe(
